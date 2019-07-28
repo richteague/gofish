@@ -10,29 +10,468 @@ class imagecube:
     fwhm = 2. * np.sqrt(2 * np.log(2))
     disk_coords_niter = 20
 
-    def __init__(self, path, kelvin=False, clip=None, resample=1, verbose=None,
-                 suppress_warnings=True, dx0=0.0, dy0=0.0):
+    def __init__(self, path, clip=None):
         """
         Load up a FITS image cube.
 
         Args:
             path (str): Relative path to the FITS cube.
-            kelvin (Optional[bool/str]): Convert the brightness units to [K].
-                If True, use the full Planck law, or if 'RJ' use the
-                Rayleigh-Jeans approximation. This is not as accurate but does
-                not suffer as much in the low intensity regime.
             clip (Optional[float]): Clip the image cube down to a FOV spanning
                 (2 * clip) in [arcseconds].
-            resample (Optional[int]): Resample the data spectrally, averaging
-                over `resample` number of channels.
-            verbose (Optional[bool]): Print out warning messages messages.
-            suppress_warnings (Optional[bool]): Suppress warnings from other
-                Python pacakges (for example numpy). If this is selected then
-                verbose will be set to False unless specified.
-            dx0 (Optional[float]): Recenter the image to this right ascencion
-                offset [arcsec].
-            dy0 (Optional[float]): Recenter the image to this declination
-                offset [arcsec].
-        Returns:
-            None)
         """
+        self._read_FITS(path)
+        if clip is not None:
+            self._clip_cube(clip)
+        if self.data.ndim != 3:
+            raise ValueError("Provided cube must be 3D (PPV).")
+
+    # -- Fishing Functions -- #
+
+    def get_spectra(self, r_min=None, r_max=None, rbins=None, rvals=None,
+                    x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
+                    phi=1.0, mstar=1.0, dist=100., resample=1, unit='Jy'):
+        """
+        Return the integrated or averaged spectra over a given radial range.
+        """
+
+        # Radial sampling.
+        rbins, rvals = self.radial_sampling(rbins=rbins, rvals=rvals)
+        r_min = rvals[0] if r_min is None else r_min
+        r_max = rvals[-1] if r_max is None else r_max
+
+        # Keplerian velocity at the annulus centers.
+        v_kep = self._keplerian(rvals=rvals, mstar=mstar, dist=dist, inc=inc,
+                                z0=z0, psi=psi, z1=z1, phi=phi)
+
+        # Output unit.
+        unit = unit.lower()
+        if unit not in ['jy', 'jy/beam']:
+            raise ValueError("Unknown `unit`.")
+
+        # Get the deprojected spectrum for each annulus.
+        # TODO: Update the masking routine here.
+        spectra, noise = [], []
+        for ridx in range(rvals.size):
+            if rvals[ridx] < r_min or rvals[ridx] > r_max:
+                continue
+            annulus = cube.get_annulus(rbins[ridx], rbins[ridx+1],
+                                       x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
+                                       psi=psi, z1=z1, phi=phi,
+                                       beam_spacing=False, as_ensemble=True)
+            velax, spectrum = annulus.deprojected_spectrum(vrot=v_kep[ridx],
+                                                           resample=resample)
+            spectra += [spectrum]
+        spectra = np.where(np.isfinite(spectra), spectra, 0.0)
+
+        # Weight the annulus based on its area.
+        r_annuli = np.linspace(r_min, r_max, len(spectra))
+        dr = np.diff(r_annuli).mean() / 2.0
+        weights = np.pi * ((r_annuli + dr)**2 - (r_annuli - dr)**2)
+        spectrum = np.average(spectra, axis=0, weights=weights)
+
+        # Convert. Note that here 'Jy' results in an integrated quantity,
+        # while 'Jy/beam' results in an _average_ spectrum.
+        if unit == 'jy':
+            nbeams = np.pi * (r_max**2 - r_min**2)
+            nbeams /= cube._calculate_beam_area_arcsec()
+            spectrum *= nbeams
+        return velax, spectrum
+
+
+    def _keplerian(self, rvals, mstar=1.0, dist=100., inc=90.0, z0=0.0,
+                   psi=1.0, z1=0.0, phi=1.0):
+        """
+        Return a Keplerian rotation profile [m/s] at rpnts [arcsec].
+
+        Args:
+            rvals (ndarray/float): Radial locations in [arcsec] to calculate
+                the Keplerian rotation curve at.
+            mstar (float): Mass of the central star in [Msun].
+            dist (float): Distance to the source in [pc].
+            inc (Optional[float]): Inclination of the source in [deg]. If not
+                provided, will return the unprojected value.
+            z0 (Optional[float]): Aspect ratio at 1" for the emission surface.
+                To get the far side of the disk, make this number negative.
+            psi (Optional[float]): Flaring angle for the emission surface.
+            z1 (Optional[float]): Aspect ratio correction term at 1" for the
+                emission surface. Should be opposite sign to z0.
+            phi (Optional[float]): Flaring angle correction term for the
+                emission surface.
+
+        Returns:
+            vkep (ndarray/float): Keplerian rotation curve [m/s] at the
+                specified radial locations.
+        """
+        rvals = np.squeeze(rvals)
+        zpnts = z0 * np.power(rvals, psi) + z1 * np.power(rvals, phi)
+        r_m, z_m = rpnts * dist * sc.au, zpnts * dist * sc.au
+        vkep = sc.G * mstar * self.msun * np.power(r_m, 2.0)
+        vkep = np.sqrt(vkep / np.power(np.hypot(r_m, z_m), 3.0))
+        return vkep * np.sin(np.radians(inc))
+
+
+    # -- Annulus Masking Functions -- #
+
+    def get_annulus(self, r_min, r_max, PA_min=None, PA_max=None,
+                    exclude_PA=False, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
+                    psi=1.0, z1=0.0, phi=1.0, z_func=None, beam_spacing=True,
+                    return_theta=True, as_annulus=True, suppress_warnings=True,
+                    remove_empty=True, sort_spectra=True, **kwargs):
+        """
+        Return an annulus (or section of), of spectra and their polar angles.
+        Can select spatially independent pixels within the annulus, however as
+        this is random, each draw will be different.
+
+        Args:
+            r_min (float): Minimum midplane radius of the annulus in [arcsec].
+            r_max (float): Maximum midplane radius of the annulus in [arcsec].
+            PA_min (Optional[float]): Minimum polar angle of the segment of the
+                annulus in [degrees]. Note this is the polar angle, not the
+                position angle.
+            PA_max (Optional[float]): Maximum polar angle of the segment of the
+                annulus in [degrees]. Note this is the polar angle, not the
+                position angle.
+            exclude_PA (Optional[bool]): If True, exclude the provided polar
+                angle range rather than include.
+            x0 (Optional[float]): Source right ascension offset [arcsec].
+            y0 (Optional[float]): Source declination offset [arcsec].
+            inc (Optional[float]): Source inclination [deg].
+            PA (Optional[float]): Source position angle [deg]. Measured
+                between north and the red-shifted semi-major axis in an
+                easterly direction.
+            z0 (Optional[float]): Aspect ratio at 1" for the emission surface.
+                To get the far side of the disk, make this number negative.
+            psi (Optional[float]): Flaring angle for the emission surface.
+            z1 (Optional[float]): Aspect ratio correction term at 1" for the
+                emission surface. Should be opposite sign to z0.
+            phi (Optional[float]): Flaring angle correction term for the
+                emission surface.
+            z_func (Optional[function]): A function which provides z(r). Note
+                that no checking will occur to make sure this is a valid
+                function.
+            beam_spacing (Optional[bool/float]): If True, randomly sample the
+                annulus such that each pixel is at least a beam FWHM apart. A
+                number can also be used in place of a boolean which will
+                describe the number of beam FWHMs to separate each sample by.
+            annulus (Optional[bool]): If true, return an annulus instance
+                from `eddy`. Requires `eddy` to be installed.
+
+        Returns:
+            spectra (ndarray): The spectra from each pixel in the annulus.
+            theta (ndarray): The midplane polar angles in [radians] of each of
+                the returned spectra.
+            ensemble (annulus instance): An `eddy` annulus instance if
+                as_ensemble == True.
+        """
+
+        # Flatten the data.
+
+        dvals = self.data.copy()
+        dvals = dvals.reshape(self.data.shape[0], -1)
+
+        # Apply the mask.
+
+        mask = self._get_mask(r_min=r_min, r_max=r_max, exclude_r=False,
+                              PA_min=PA_min, PA_max=PA_max,
+                              exclude_PA=exclude_PA, x0=x0, y0=y0, inc=inc,
+                              PA=PA, z0=z0, psi=psi, z1=z1, phi=phi,
+                              z_func=z_func)
+        mask = mask.flatten()
+
+        rvals, tvals, _ = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
+                                           psi=psi, z1=z1, phi=phi,
+                                           z_func=z_func)
+        rvals, tvals = rvals.flatten(), tvals.flatten()
+        dvals, rvals, tvals = dvals[:, mask].T, rvals[mask], tvals[mask]
+
+        # Apply the beam sampling.
+
+        if beam_spacing:
+
+            # Order the data in increase position angle.
+
+            idxs = np.argsort(tvals)
+            dvals, tvals = dvals[idxs], tvals[idxs]
+
+            # Calculate the sampling rate.
+
+            sampling = float(beam_spacing) * self.bmaj
+            sampling /= np.mean(rvals) * np.median(np.diff(tvals))
+            sampling = np.floor(sampling).astype('int')
+
+            # If the sampling rate is above 1, start at a random location in
+            # the array and sample at this rate, otherwise don't sample. This
+            # happens at small radii, for example.
+
+            if sampling > 1:
+                start = np.random.randint(0, tvals.size)
+                tvals = np.concatenate([tvals[start:], tvals[:start]])
+                dvals = np.vstack([dvals[start:], dvals[:start]])
+                tvals, dvals = tvals[::sampling], dvals[::sampling]
+
+        # Return the values in the requested form.
+
+        if as_annulus:
+            from eddy.fit_annulus import annulus
+            return annulus(spectra=dvals, theta=tvals, velax=self.velax,
+                           suppress_warnings=suppress_warnings,
+                           remove_empty=remove_empty,
+                           sort_spectra=sort_spectra)
+        return dvals, tvals
+
+    def _get_mask(self, r_min=None, r_max=None, exclude_r=False, PA_min=None,
+                  PA_max=None, exclude_PA=False, x0=0.0, y0=0.0, inc=0.0,
+                  PA=0.0, z0=0.0, psi=1.0, z1=0.0, phi=1.0, z_func=None):
+        """Returns a 2D mask for pixels in the given region."""
+        rvals, tvals, _ = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
+                                           psi=psi, z1=z1, phi=phi,
+                                           z_func=z_func, frame='cylindrical')
+        r_min = np.nanmin(rvals) if r_min is None else r_min
+        r_max = np.nanmax(rvals) if r_max is None else r_max
+        r_mask = np.logical_and(rvals >= r_min, rvals <= r_max)
+        r_mask = ~r_mask if exclude_r else r_mask
+        PA_min = np.nanmin(tvals) if PA_min is None else np.radians(PA_min)
+        PA_max = np.nanmax(tvals) if PA_max is None else np.radians(PA_max)
+        PA_mask = np.logical_and(tvals >= PA_min, tvals <= PA_max)
+        PA_mask = ~PA_mask if exclude_PA else PA_mask
+        return r_mask * PA_mask
+
+    def radial_sampling(self, rbins=None, rvals=None, spacing=0.25):
+        """
+        Return bins and bin center values. If the desired bin edges are known,
+        will return the bin edges and vice versa. If neither are known will
+        return default binning with the desired spacing.
+
+        Args:
+            rbins (optional[list]): List of bin edges.
+            rvals (optional[list]): List of bin centers.
+            spacing (optional[float]): Spacing of bin centers in units of beam
+                major axis.
+
+        Returns:
+            rbins (list): List of bin edges.
+            rpnts (list): List of bin centres.
+        """
+        if rbins is not None and rvals is not None:
+            raise ValueError("Specify only 'rbins' or 'rvals', not both.")
+        if rvals is not None:
+            dr = np.diff(rvals)[0] * 0.5
+            rbins = np.linspace(rvals[0] - dr, rvals[-1] + dr, len(rvals) + 1)
+        if rbins is not None:
+            rvals = np.average([rbins[1:], rbins[:-1]], axis=0)
+        else:
+            rbins = np.arange(0, self.xaxis.max(), spacing * self.bmaj)[1:]
+            rvals = np.average([rbins[1:], rbins[:-1]], axis=0)
+        return rbins, rvals
+
+    # -- Deprojection Functions -- #
+
+    def disk_coords(self, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=0.0,
+                    z1=0.0, phi=0.0, z_func=None, extend=2., oversample=1,
+                    frame='cylindrical'):
+        """
+        Get the disk coordinates given certain geometrical parameters and an
+        emission surface. The emission surface is parameterized as a powerlaw
+        profile: z(r) = z0 * (r / 1")^psi. For a razor thin disk, z0 = 0.0,
+        while for a conical disk, as described in Rosenfeld et al. (2013),
+        psi = 1.0. A correction term, z' = z1 * (r / 1")^phi can be included
+        to replicate the downward curve of the emission surface in the outer
+        disk.
+
+        Args:
+            x0 (Optional[float]): Source right ascension offset [arcsec].
+            y0 (Optional[float]): Source declination offset [arcsec].
+            inc (Optional[float]): Source inclination [deg].
+            PA (Optional[float]): Source position angle [deg]. Measured
+                between north and the red-shifted semi-major axis in an
+                easterly direction.
+            z0 (Optional[float]): Aspect ratio at 1" for the emission surface.
+                To get the far side of the disk, make this number negative.
+            psi (Optional[float]): Flaring angle for the emission surface.
+            z1 (Optional[float]): Aspect ratio correction term at 1" for the
+                emission surface. Should be opposite sign to z0.
+            phi (Optional[float]): Flaring angle correction term for the
+                emission surface.
+            frame (Optional[str]): Frame of reference for the returned
+                coordinates. Either 'polar' or 'cartesian'.
+            z_func (Optional[function]): A function which provides z(r). Note
+                that no checking will occur to make sure this is a valid
+                function.
+            extend (Optional[float]): Factor to extend the axis of the
+                attached cube for the modelling.
+            oversample (Optional[float]): Rescale the number of pixels along
+                each axis. A larger number gives a better result, but at the
+                cost of computation time.
+
+        Returns:
+            c1 (ndarryy): Either r (cylindrical) or x depending on the frame.
+            c2 (ndarray): Either theta or y depending on the frame.
+            c3 (ndarray): Height above the midplane, z.
+        """
+
+        # Check the input variables.
+
+        frame = frame.lower()
+        if frame not in ['cylindrical', 'cartesian']:
+            raise ValueError("frame must be 'cylindrical' or 'cartesian'.")
+
+        # Define the emission surface function. Either use the simple double
+        # power-law profile or the user-provied function.
+
+        if z_func is None:
+            def z_func(r):
+                z = z0 * np.power(r, psi) + z1 * np.power(r, phi)
+                if z0 >= 0.0:
+                    return np.clip(z, a_min=0.0, a_max=None)
+                return np.clip(z, a_min=None, a_max=0.0)
+
+        # Calculate the pixel values.
+        r, t, z = self._get_flared_coords(x0, y0, inc, PA, z_func)
+        if frame == 'cylindrical':
+            return r, t, z
+        return r * np.cos(t), r * np.sin(t), z
+
+    @staticmethod
+    def _rotate_coords(x, y, PA):
+        """Rotate (x, y) by PA [deg]."""
+        x_rot = y * np.cos(np.radians(PA)) + x * np.sin(np.radians(PA))
+        y_rot = x * np.cos(np.radians(PA)) - y * np.sin(np.radians(PA))
+        return x_rot, y_rot
+
+    @staticmethod
+    def _deproject_coords(x, y, inc):
+        """Deproject (x, y) by inc [deg]."""
+        return x, y / np.cos(np.radians(inc))
+
+    def _get_cart_sky_coords(self, x0, y0):
+        """Return caresian sky coordinates in [arcsec, arcsec]."""
+        return np.meshgrid(self.xaxis - x0, self.yaxis - y0)
+
+    def _get_polar_sky_coords(self, x0, y0):
+        """Return polar sky coordinates in [arcsec, radians]."""
+        x_sky, y_sky = self._get_cart_sky_coords(x0, y0)
+        return np.hypot(y_sky, x_sky), np.arctan2(x_sky, y_sky)
+
+    def _get_midplane_cart_coords(self, x0, y0, inc, PA):
+        """Return cartesian coordaintes of midplane in [arcsec, arcsec]."""
+        x_sky, y_sky = self._get_cart_sky_coords(x0, y0)
+        x_rot, y_rot = imagecube._rotate_coords(x_sky, y_sky, PA)
+        return imagecube._deproject_coords(x_rot, y_rot, inc)
+
+    def _get_midplane_polar_coords(self, x0, y0, inc, PA):
+        """Return the polar coordinates of midplane in [arcsec, radians]."""
+        x_mid, y_mid = self._get_midplane_cart_coords(x0, y0, inc, PA)
+        return np.hypot(y_mid, x_mid), np.arctan2(y_mid, x_mid)
+
+    def _get_flared_coords(self, x0, y0, inc, PA, z_func):
+        """Return cylindrical coordinates of surface in [arcsec, radians]."""
+        x_mid, y_mid = self._get_midplane_cart_coords(x0, y0, inc, PA)
+        r_tmp, t_tmp = np.hypot(x_mid, y_mid), np.arctan2(y_mid, x_mid)
+        for _ in range(self.disk_coords_niter):
+            y_tmp = y_mid + z_func(r_tmp) * np.tan(np.radians(inc))
+            r_tmp = np.hypot(y_tmp, x_mid)
+            t_tmp = np.arctan2(y_tmp, x_mid)
+        return r_tmp, t_tmp, z_func(r_tmp)
+
+    # -- FITS Reading -- #
+
+    def _read_FITS(self, path):
+        """Reads the data from the FITS file."""
+        self.path = os.path.expanduser(path)
+        self.fname = self.path.split('/')[-1]
+        self.header = fits.getheader(path)
+        self.data = np.squeeze(fits.getdata(self.path))
+        self.data = np.where(np.isfinite(self.data), self.data, 0.0)
+        self._read_beam()
+
+    def _read_beam(self):
+        """Reads the beam properties from the header."""
+        try:
+            if self.header.get('CASAMBM', False):
+                beam = fits.open(self.path)[1].data
+                beam = np.median([b[:3] for b in beam.view()], axis=0)
+                self.bmaj, self.bmin, self.bpa = beam
+            else:
+                self.bmaj = self.header['bmaj'] * 3600.
+                self.bmin = self.header['bmin'] * 3600.
+                self.bpa = self.header['bpa']
+        except Exception:
+            self.bmaj = self.dpix
+            self.bmin = self.dpix
+            self.bpa = 0.0
+            self.beamarea = self.dpix**2.0
+
+    def _clip_cube(self, radius):
+        """Clip the cube to +\- clip arcseconds from the origin."""
+        xa = abs(self.xaxis - radius).argmin()
+        if self.xaxis[xa] < radius:
+            xa -= 1
+        xb = abs(self.xaxis + radius).argmin()
+        if -self.xaxis[xb] < radius:
+            xb += 1
+        xb += 1
+        ya = abs(self.yaxis + radius).argmin()
+        if -self.yaxis[ya] < radius:
+            ya -= 1
+        yb = abs(self.yaxis - radius).argmin()
+        if self.yaxis[yb] < radius:
+            yb += 1
+        yb += 1
+        if self.data.ndim == 3:
+            self.data = self.data[:, ya:yb, xa:xb]
+        else:
+            self.data = self.data[ya:yb, xa:xb]
+        self.xaxis = self.xaxis[xa:xb]
+        self.yaxis = self.yaxis[ya:yb]
+        self.nxpix = self.xaxis.size
+        self.nypix = self.yaxis.size
+
+    def _readspectralaxis(self, a):
+        """Returns the spectral axis in [Hz] or [m/s]."""
+        a_len = self.header['naxis%d' % a]
+        a_del = self.header['cdelt%d' % a]
+        a_pix = self.header['crpix%d' % a]
+        a_ref = self.header['crval%d' % a]
+        return a_ref + (np.arange(a_len) - a_pix + 1.0) * a_del
+
+    def _readpositionaxis(self, a=1):
+        """Returns the position axis in [arcseconds]."""
+        if a not in [1, 2]:
+            raise ValueError("'a' must be in [0, 1].")
+        a_len = self.header['naxis%d' % a]
+        a_del = self.header['cdelt%d' % a]
+        a_pix = self.header['crpix%d' % a]
+        a_ref = self.header['crval%d' % a]
+        a_ref = 0.0
+        a_pix -= 0.5
+        axis = a_ref + (np.arange(a_len) - a_pix + 1.0) * a_del
+        return 3600 * axis
+
+    def _readrestfreq(self):
+        """Read the rest frequency."""
+        try:
+            nu = self.header['restfreq']
+        except KeyError:
+            try:
+                nu = self.header['restfrq']
+            except KeyError:
+                nu = self.header['crval3']
+        return nu
+
+    def _readvelocityaxis(self):
+        """Wrapper for _velocityaxis and _spectralaxis."""
+        a = 4 if 'stokes' in self.header['ctype3'].lower() else 3
+        if 'freq' in self.header['ctype%d' % a].lower():
+            specax = self._readspectralaxis(a)
+            velax = (self.nu - specax) * sc.c
+            velax /= self.nu
+        else:
+            velax = self._readspectralaxis(a)
+        return velax
+
+    def _readfrequencyaxis(self):
+        """Returns the frequency axis in [Hz]."""
+        a = 4 if 'stokes' in self.header['ctype3'].lower() else 3
+        if 'freq' in self.header['ctype3'].lower():
+            return self._readspectralaxis(a)
+        return self._readrestfreq() * (1.0 - self._readvelocityaxis() / sc.c)
