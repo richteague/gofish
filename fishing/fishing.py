@@ -5,17 +5,16 @@ import scipy.constants as sc
 
 class imagecube:
     """
-    Load up a FITS image cube.
+    Base class containing all the FITS data. Must be a 3D cube containing two
+    spatial and one velocity axis. These can easily be made from CASA using the
+    ``exportfits()`` command.
 
     Args:
         path (str): Relative path to the FITS cube.
-        clip (Optional[float]): Clip the image cube down to a FOV spanning
-            (2 * clip) in [arcsec].
+        clip (Optional[float]): Clip the image cube down to a specific
+            field-of-view spanning a range ``(2 * clip)``, where ``clip`` is in
+            [arcsec].
     """
-
-    # Disk specific units.
-    msun = 1.988e30
-    disk_coords_niter = 5
 
     def __init__(self, path, clip=None):
         self._read_FITS(path)
@@ -332,7 +331,7 @@ class imagecube:
         rvals = np.squeeze(rvals)
         zvals = z0 * np.power(rvals, psi) + z1 * np.power(rvals, phi)
         r_m, z_m = rvals * dist * sc.au, zvals * dist * sc.au
-        vkep = sc.G * mstar * self.msun * np.power(r_m, 2.0)
+        vkep = sc.G * mstar * 1.988e30 * np.power(r_m, 2.0)
         vkep = np.sqrt(vkep / np.power(np.hypot(r_m, z_m), 3.0))
         return vkep * np.sin(abs(np.radians(inc)))
 
@@ -473,9 +472,9 @@ class imagecube:
         return default binning with the desired spacing.
 
         Args:
-            rbins (optional[list]): List of bin edges.
-            rvals (optional[list]): List of bin centers.
-            spacing (optional[float]): Spacing of bin centers in units of beam
+            rbins (Optional[list]): List of bin edges.
+            rvals (Optional[list]): List of bin centers.
+            spacing (Optional[float]): Spacing of bin centers in units of beam
                 major axis.
 
         Returns:
@@ -599,7 +598,7 @@ class imagecube:
         """Return cylindrical coordinates of surface in [arcsec, radians]."""
         x_mid, y_mid = self._get_midplane_cart_coords(x0, y0, inc, PA)
         r_tmp, t_tmp = np.hypot(x_mid, y_mid), np.arctan2(y_mid, x_mid)
-        for _ in range(self.disk_coords_niter):
+        for _ in range(10):
             y_tmp = y_mid + z_func(r_tmp) * np.tan(np.radians(inc))
             r_tmp = np.hypot(y_tmp, x_mid)
             t_tmp = np.arctan2(y_tmp, x_mid)

@@ -5,5 +5,7 @@ API
 
 Everything is based on the following class.
 
+.. autofunction::
+
 .. autoclass:: fishing.fishing.imagecube
-    :inherited-members:
+    :members: average_spectrum
