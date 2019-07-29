@@ -5,5 +5,5 @@ API
 
 Everything is based on the following class.
 
-.. autoclass:: fishing.fishing.fishing.imagecube
+.. autoclass:: fishing.fishing.imagecube
     :inherited-members:
