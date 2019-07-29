@@ -292,14 +292,8 @@ class imagecube:
                 x, y, _ = spectrum_func(x0=x0, y0=y0, **kwargs)
                 SNR[j, i] = SNR_func(x, y, mask)
 
-        # Normalize the SNR relative to (x0, y0) = (0, 0).
-        if normalize:
-            SNR /= SNR[abs(y0s).argmin(), abs(x0s).argmin()]
-
         # Determine the optimum position.
-        yidx, xidx = np.unravel_index(SNR.argmax(), SNR.shape)
-        x0, y0 = x0s[xidx], y0s[yidx]
-        print('Peak SNR at (x0, y0) = ({:.2f}", {:.2f}").'.format(x0, y0))
+        self._plot_center(x0s, y0s, SNR, normalize)
         return x0s, y0s, SNR
 
     def _integrated_SNR(self, x, y, mask):
@@ -761,3 +755,61 @@ class imagecube:
     def extent(self):
         """Cube field of view for use with Matplotlib's ``imshow``."""
         return [self.xaxis[0], self.xaxis[-1], self.yaxis[0], self.yaxis[-1]]
+
+    # -- Plotting Functions -- #
+
+    def _plot_center(self, x0s, y0s, SNR, normalize=True):
+        """Plot the array of SNR values."""
+        import matplotlib.pyplot as plt
+
+        # Find the center.
+        yidx, xidx = np.unravel_index(SNR.argmax(), SNR.shape)
+        x0, y0 = x0s[xidx], y0s[yidx]
+        print('Peak SNR at (x0, y0) = ({:.2f}", {:.2f}").'.format(x0, y0))
+
+        # Define the levels.
+        if normalize:
+            SNR /= SNR[abs(y0s).argmin(), abs(x0s).argmin()]
+            vmax = abs(SNR - 1.0).max()
+            vmin = 1.0 - vmax
+            vmax = 1.0 + vmax
+            cb_label = 'Normalized SNR'
+        else:
+            vmax = SNR.min()
+            vmin = SNR.max()
+            cb_label = 'SNR'
+
+        # Plot the figure.
+        _, ax = plt.subplots()
+        im = ax.imshow(SNR, extent=[x0s[0], x0s[-1], y0s[0], y0s[-1]],
+                       origin='lower', vmax=vmax, vmin=vmin, cmap='RdGy_r')
+        cb = plt.colorbar(im, pad=0.02)
+        cb.set_label(cb_label, rotation=270, labelpad=13)
+        ax.scatter(x0, y0, marker='x', s=60, c='w', linewidths=2.)
+        ax.scatter(x0, y0, marker='x', s=30, c='k', linewidths=1.)
+        ax.set_aspect(1)
+        ax.set_xlim(x0s[-1], x0s[0])
+        ax.set_ylim(y0s[0], y0s[-1])
+        ax.tick_params(which='both', right=1, top=1)
+        ax.set_xlabel('Offset (arcsec)')
+        ax.set_ylabel('Offset (arcsec)')
+        self._plot_beam(ax=ax)
+
+    def _plot_beam(self, ax, x0=0.1, y0=0.1, **kwargs):
+        """
+        Plot the sythensized beam on the provided axes.
+
+        Args:
+            ax (matplotlib axes instance): Axes to plot the FWHM.
+            x0 (float): Relative x-location of the marker.
+            y0 (float): Relative y-location of the marker.
+            kwargs (dic): Additional kwargs for the style of the plotting.
+        """
+        from matplotlib.patches import Ellipse
+        beam = Ellipse(ax.transLimits.inverted().transform((x0, y0)),
+                       width=self.bmin, height=self.bmaj, angle=-self.bpa,
+                       fill=False, hatch=kwargs.pop('hatch', '////////'),
+                       lw=kwargs.pop('linewidth', kwargs.pop('lw', 1)),
+                       color=kwargs.pop('color', kwargs.pop('c', 'k')),
+                       zorder=kwargs.pop('zorder', 1000), **kwargs)
+        ax.add_patch(beam)

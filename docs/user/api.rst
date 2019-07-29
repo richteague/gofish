@@ -1,4 +1,4 @@
-.. module:: fishing.fishing
+.. module:: fishing.fishing.imagecube
 
 API
 ===
