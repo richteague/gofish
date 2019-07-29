@@ -3,9 +3,5 @@
 API
 ===
 
-Everything is based on the following class.
-
-.. autofunction::
-
 .. autoclass:: fishing.fishing.imagecube
-    :members: average_spectrum
+    :members: average_spectrum, integrated_spectrum, find_center, disk_coords

@@ -91,6 +91,7 @@ class imagecube:
             velax (array): Velocity axis in [m/s] with the requested sampling
                 rate from `resample`.
             spectrum (array): Integrated spectrum in [Jy].
+
         """
 
         # Radial sampling. Try to get as close to r_bin as possible.
@@ -161,7 +162,8 @@ class imagecube:
             r_max (Optional[float]): Outer radius in [arcsec] of the region to
                 integrate.
             dr_bin (Optional[float]): Width of the annuli to split the
-            integrated region into. Default is quater of the beam major axis.
+                integrated region into. Default is quater of the beam major
+                axis.
             x0 (Optional[float]): Source center offset along the x-axis in
                 [arcsec].
             y0 (Optional[float]): Source center offset along the y-axis in
@@ -180,7 +182,7 @@ class imagecube:
             resample(Optional[float/int]): Resampling parameter for the
                 deprojected spectrum. An integer specifies an average of that
                 many channels, while a float specifies the desired channel
-                width. Default is `1`.
+                width. Default is ``resample=1``.
             beam_spacing(Optional[bool]): When extracting the annuli, whether
                 to choose spatially independent pixels or not.
             PA_min (Optional[float]): Minimum polar angle to include in the
@@ -192,17 +194,19 @@ class imagecube:
                 the disk-frame, unlike the position angle which is measured in
                 the sky-plane.
             exclude_PA (Optional[bool]): Whether to exclude pixels where
-                `PA_min <= PA_pix <= PA_max`.
+                ``PA_min <= PA_pix <= PA_max``.
 
         Returns:
             velax (array): Velocity axis in [m/s] with the requested sampling
                 rate from `resample`.
             spectrum (array): Integrated spectrum in [Jy].
             scatter (array): Weighted scatter in each velocity bin [Jy].
+
         """
         x, y, dy = self.average_spectrum(r_min=r_min, r_max=r_max,
                                          dr_bin=dr_bin, x0=x0, y0=y0, inc=inc,
-                                         PA=PA, z0=z0, psi=psi, z1=z1, phi=phi, mstar=mstar, dist=dist,
+                                         PA=PA, z0=z0, psi=psi, z1=z1, phi=phi,
+                                         mstar=mstar, dist=dist,
                                          resample=resample,
                                          beam_spacing=beam_spacing,
                                          PA_min=PA_min, PA_max=PA_max,
