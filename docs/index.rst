@@ -1,5 +1,5 @@
-Fishing for Molecular Lines
-===========================
+`Go Fish` - Fishing for Molecular Lines
+=======================================
 
 This will get filled up at some point.
 

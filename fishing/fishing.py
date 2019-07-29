@@ -7,7 +7,7 @@ class imagecube:
 
     # Disk specific units.
     msun = 1.988e30
-    fwhm = 2. * np.sqrt(2 * np.log(2))
+    fwhm = 2. * np.sqrt(2. * np.log(2.))
     disk_coords_niter = 5
 
     def __init__(self, path, clip=None):
@@ -51,7 +51,8 @@ class imagecube:
             r_max (Optional[float]): Outer radius in [arcsec] of the region to
                 integrate.
             dr_bin (Optional[float]): Width of the annuli to split the
-            integrated region into. Default is quater of the beam major axis.
+                integrated region into. Default is quater of the beam major
+                axis.
             x0 (Optional[float]): Source center offset along the x-axis in
                 [arcsec].
             y0 (Optional[float]): Source center offset along the y-axis in
@@ -70,7 +71,7 @@ class imagecube:
             resample(Optional[float/int]): Resampling parameter for the
                 deprojected spectrum. An integer specifies an average of that
                 many channels, while a float specifies the desired channel
-                width. Default is `1`.
+                width. Default is ``resample=1``.
             beam_spacing(Optional[bool]): When extracting the annuli, whether
                 to choose spatially independent pixels or not.
             PA_min (Optional[float]): Minimum polar angle to include in the
@@ -82,7 +83,7 @@ class imagecube:
                 the disk-frame, unlike the position angle which is measured in
                 the sky-plane.
             exclude_PA (Optional[bool]): Whether to exclude pixels where
-                `PA_min <= PA_pix <= PA_max`.
+                ``PA_min <= PA_pix <= PA_max``.
             unit (Optional[str]): Units for the spectrum, either `'Jy/beam'` or
                 `'K'`. Note that the conversion to Kelvin assumes the
                 Rayleigh-Jeans approximation which is typically invalid at
@@ -503,16 +504,20 @@ class imagecube:
     # -- Deprojection Functions -- #
 
     def disk_coords(self, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=0.0,
-                    z1=0.0, phi=0.0, z_func=None, extend=2., oversample=1,
-                    frame='cylindrical'):
-        """
+                    z1=0.0, phi=0.0, z_func=None, frame='cylindrical'):
+        r"""
         Get the disk coordinates given certain geometrical parameters and an
         emission surface. The emission surface is parameterized as a powerlaw
-        profile: z(r) = z0 * (r / 1")^psi. For a razor thin disk, z0 = 0.0,
-        while for a conical disk, as described in Rosenfeld et al. (2013),
-        psi = 1.0. A correction term, z' = z1 * (r / 1")^phi can be included
-        to replicate the downward curve of the emission surface in the outer
-        disk.
+        profile:
+
+        .. math::
+
+            z(r) = z_0 \times \left(\frac{r}{1^{\prime\prime}}\right)^{\psi} +
+            z_1 \times \left(\frac{r}{1^{\prime\prime}}\right)^{\varphi}
+
+        Where both ``z0`` and ``z1`` are given in [arcsec]. For a razor thin
+        disk, ``z0=0.0``, while for a conical disk, as described in `Rosenfeld
+        et al. (2013)`_, ``psi=1.0``.
 
         Args:
             x0 (Optional[float]): Source right ascension offset [arcsec].
@@ -525,19 +530,14 @@ class imagecube:
                 To get the far side of the disk, make this number negative.
             psi (Optional[float]): Flaring angle for the emission surface.
             z1 (Optional[float]): Aspect ratio correction term at 1" for the
-                emission surface. Should be opposite sign to z0.
+                emission surface. Should be opposite sign to ``z0``.
             phi (Optional[float]): Flaring angle correction term for the
                 emission surface.
             frame (Optional[str]): Frame of reference for the returned
-                coordinates. Either 'polar' or 'cartesian'.
-            z_func (Optional[function]): A function which provides z(r). Note
-                that no checking will occur to make sure this is a valid
-                function.
-            extend (Optional[float]): Factor to extend the axis of the
-                attached cube for the modelling.
-            oversample (Optional[float]): Rescale the number of pixels along
-                each axis. A larger number gives a better result, but at the
-                cost of computation time.
+                coordinates. Either ``'polar'`` or ``'cartesian'``.
+            z_func (Optional[function]): A function which provides
+                :math:`z(r)`. Note that no checking will occur to make sure
+                this is a valid function.
 
         Returns:
             c1 (ndarryy): Either r (cylindrical) or x depending on the frame.
@@ -759,5 +759,5 @@ class imagecube:
 
     @property
     def extent(self):
-        """Extent for imshow."""
+        """Cube field of view for use with Matplotlib's ``imshow``."""
         return [self.xaxis[0], self.xaxis[-1], self.yaxis[0], self.yaxis[-1]]

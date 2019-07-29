@@ -39,7 +39,7 @@ extensions = [
 ]
 master_doc = "index"
 # Get that autodoc working.
-autodoc_mock_imports = ['astropy', 'scipy', 'argparse', 'numpy', 'eddy']
+autodoc_mock_imports = ['astropy', 'scipy', 'argparse', 'eddy']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
