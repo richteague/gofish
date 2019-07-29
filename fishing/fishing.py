@@ -4,20 +4,20 @@ from astropy.io import fits
 import scipy.constants as sc
 
 class imagecube:
+    """
+    Load up a FITS image cube.
+
+    Args:
+        path (str): Relative path to the FITS cube.
+        clip (Optional[float]): Clip the image cube down to a FOV spanning
+            (2 * clip) in [arcsec].
+    """
 
     # Disk specific units.
     msun = 1.988e30
     disk_coords_niter = 5
 
     def __init__(self, path, clip=None):
-        """
-        Load up a FITS image cube.
-
-        Args:
-            path (str): Relative path to the FITS cube.
-            clip (Optional[float]): Clip the image cube down to a FOV spanning
-                (2 * clip) in [arcsec].
-        """
         self._read_FITS(path)
         if clip is not None:
             self._clip_cube(clip)
@@ -39,10 +39,10 @@ class imagecube:
         The `resample` parameter allows you to resample the
         spectrum at a different velocity spacing (by providing a float
         argument) or averaging of an integer number of channels (by providing
-        an integer argument). For example, `resample=3`, will return a velocity
-        axis which has been downsampled such that a channel is three times as
-        wide as the intrinsic width. Instead, `resample=50.0` will result in a
-        velocity axis with a channel spacing of 50 m/s.
+        an integer argument). For example, ``resample=3``, will return a
+        velocity axis which has been downsampled such that a channel is three
+        times as wide as the intrinsic width. Instead, ``resample=50.0`` will
+        result in a velocity axis with a channel spacing of 50 m/s.
 
         Args:
             r_min (Optional[float]): Inner radius in [arcsec] of the region to
@@ -83,8 +83,8 @@ class imagecube:
                 the sky-plane.
             exclude_PA (Optional[bool]): Whether to exclude pixels where
                 ``PA_min <= PA_pix <= PA_max``.
-            unit (Optional[str]): Units for the spectrum, either `'Jy/beam'` or
-                `'K'`. Note that the conversion to Kelvin assumes the
+            unit (Optional[str]): Units for the spectrum, either ``'Jy/beam'``
+                or ``'K'``. Note that the conversion to Kelvin assumes the
                 Rayleigh-Jeans approximation which is typically invalid at
                 sub-mm wavelengths.
 
@@ -510,7 +510,10 @@ class imagecube:
 
         Where both ``z0`` and ``z1`` are given in [arcsec]. For a razor thin
         disk, ``z0=0.0``, while for a conical disk, as described in `Rosenfeld
-        et al. (2013)`_, ``psi=1.0``.
+        et al. (2013)`_, ``psi=1.0``. Typically ``z1`` is not needed unless the
+        data is exceptionally high SNR and well spatially resolved.
+
+        .. _Rosenfeld et al. (2013): https://ui.adsabs.harvard.edu/abs/2013ApJ...774...16R/
 
         Args:
             x0 (Optional[float]): Source right ascension offset [arcsec].
