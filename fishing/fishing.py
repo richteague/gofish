@@ -7,7 +7,6 @@ class imagecube:
 
     # Disk specific units.
     msun = 1.988e30
-    fwhm = 2. * np.sqrt(2. * np.log(2.))
     disk_coords_niter = 5
 
     def __init__(self, path, clip=None):
