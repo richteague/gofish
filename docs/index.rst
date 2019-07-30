@@ -39,7 +39,7 @@ We would strongly recommend using ``VISIBLE`` (`Loomis et al. 2017`_), which is 
    :caption: Contents:
 
    user/api
-   _static/fishing_basics
+   user/fishing_basics
 
 .. General operations for integrated spectra help
 
