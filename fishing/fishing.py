@@ -228,10 +228,10 @@ class imagecube:
                 direction in [arcsec]. Default is one beam FWHM.
             dy (Optional[float]): Maximum offset to consider in the `y`
                 direction in [arcsec]. Default is one beam FWHM.
-            Nx (Optional[int]): Number of samples to take along the +\- ``dx``
-                range. Default results in roughtly pixel spacing.
-            Ny (Optional[int]): Number of samples to take along the +\- ``dy``
-                range. Default results in roughtly pixel spacing.
+            Nx (Optional[int]): Number of samples to take along the `x`
+                direction. Default results in roughtly pixel spacing.
+            Ny (Optional[int]): Number of samples to take along the `y`
+                direction. Default results in roughtly pixel spacing.
             mask (Optional[array]): Boolean mask of channels to use when
                 calculating the integrated flux or RMS noise.
             v_min (Optional[float]): Minimum velocity in [m/s] to consider if
