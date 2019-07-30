@@ -1,7 +1,7 @@
-.. module:: fishing.fishing.imagecube
+.. module:: gofish.gofish.imagecube
 
 API
 ===
 
-.. autoclass:: fishing.fishing.imagecube
+.. autoclass:: gofish.gofish.imagecube
     :members: average_spectrum, integrated_spectrum, find_center, disk_coords

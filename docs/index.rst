@@ -1,4 +1,4 @@
-`Go Fish`
+`GoFish`
 =========
 
 .. header:: *Fishing for molecular lines in protoplanetary disks.*
