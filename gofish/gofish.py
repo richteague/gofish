@@ -39,8 +39,8 @@ class imagecube:
         spectrum at a different velocity spacing (by providing a float
         argument) or averaging of an integer number of channels (by providing
         an integer argument). For example, ``resample=3``, will return a
-        velocity axis which has been downsampled such that a channel is three
-        times as wide as the intrinsic width. Instead, ``resample=50.0`` will
+        velocity axis which has been supersampled such that a channel is three
+        times as narrow as the intrinsic width. Instead, ``resample=50.0`` will
         result in a velocity axis with a channel spacing of 50 m/s.
 
         Args:
@@ -97,6 +97,9 @@ class imagecube:
         # Radial sampling. Try to get as close to r_bin as possible.
         _, r_tmp = self.radial_sampling(rbins=None, rvals=None)
         r_min = r_tmp[0] if r_min is None else r_min
+        if r_min == 0.0:
+            r_min = self.dpix
+            print("WARNING: Setting `r_min = cube.dpix` for safety.")
         r_max = r_tmp[-1] if r_max is None else r_max
         dr_bin = 0.25 * self.bmaj if dr_bin is None else dr_bin
         if (r_max - r_min) < dr_bin:
@@ -151,10 +154,15 @@ class imagecube:
                             exclude_PA=False):
         """
         Return the integrated spectrum over a given radial range, returning a
-        spectrum in units of [Jy]. The `resample` parameter allows you to
-        resample the spectrum at a different velocity spacing (by providing a
-        float argument) or averaging of an integer number of channels (by
-        providing an integer argument).
+        spectrum in units of [Jy].
+        
+        The `resample` parameter allows you to resample the
+        spectrum at a different velocity spacing (by providing a float
+        argument) or averaging of an integer number of channels (by providing
+        an integer argument). For example, ``resample=3``, will return a
+        velocity axis which has been supersampled such that a channel is three
+        times as narrow as the intrinsic width. Instead, ``resample=50.0`` will
+        result in a velocity axis with a channel spacing of 50 m/s.
 
         Args:
             r_min (Optional[float]): Inner radius in [arcsec] of the region to
