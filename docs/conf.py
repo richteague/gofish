@@ -35,7 +35,7 @@ extensions = [
     'sphinx.ext.coverage',
     'sphinx.ext.napoleon',
     'sphinx.ext.imgmath',
-    # 'nbsphinx',
+    'nbsphinx',
 ]
 master_doc = "index"
 

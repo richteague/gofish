@@ -630,6 +630,7 @@ class imagecube:
         self.dpix = np.mean([abs(np.diff(self.xaxis))])
 
         # Spectral axis.
+        self.nu = self._readrestfreq()
         self.velax = self._readvelocityaxis()
         self.chan = np.mean(np.diff(self.velax))
         self.freqax = self._readfrequencyaxis()
@@ -640,7 +641,6 @@ class imagecube:
             self.chan *= -1.0
 
         # Extras.
-        self.nu = self._readrestfreq()
         self._read_beam()
 
     def _read_beam(self):

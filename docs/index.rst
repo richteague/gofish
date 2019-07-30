@@ -22,6 +22,11 @@ In `Teague et al. (2018a)`_ and `Teague et al. (2018b)`_, this method was invert
 
     This documentation was written with a view to being used with ALMA data. However, this method works equally well with any PPV data obtained with any IFU instrument.
 
+Installation
+^^^^^^^^^^^^
+
+Coming soon.
+
 Fishing in *uv* Space
 ^^^^^^^^^^^^^^^^^^^^^
 
@@ -34,6 +39,7 @@ We would strongly recommend using ``VISIBLE`` (`Loomis et al. 2017`_), which is 
    :caption: Contents:
 
    user/api
+   _static/fishing_basics
 
 .. General operations for integrated spectra help
 
