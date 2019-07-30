@@ -24,11 +24,11 @@ $$\delta v(r,\, \theta) = v_{\rm rot}(r) \cos (\theta) \sin (i)$$
 
 where $i$ is the inclination of the disk. Thus, if $v_{\rm rot}(r)$ is known, then this shift can be accounted for by 'correcting' each spectrum before stacking.
 
-This method was first described in [Yen et al. (2016)], however other groups were using similar techniques, such as [Teague et al. (2016)] and [Matra et al. (2017)]. A recently published code, `eddy` (Teague 2019), inverts this method to use strongly detected line emission in infer the rotation profile.
+This method was first described in `@Yen:2016`, however other groups were using similar techniques, such as `@Teague:2016` and `@Matra:2017`. A recently published code, `eddy` `[@Teague:2019]`, inverts this method to use strongly detected line emission in infer the rotation profile.
 
 # Code Summary
 
-The aim of `GoFish` is provide the functionality to perform such analyses and make them easily reproducable. The user only needs an image cube in the common FITS format, where two axes are spatial dimensions and the third is spectral.
+The aim of `GoFish` is provide the functionality to perform such analyses and make them easily reproducible. The user only needs an image cube in the common FITS format, where two axes are spatial dimensions and the third is spectral.
 
 Using known properties of the disk, namely the inclination and position angle of the disk and the distance and mass of the mass of the central star, averaged or integrated spectra over a specified radial range can be extracted. In addition, a convenience function `find_center` is provided which searches for the disk center based on maximising the signal-to-noise ratio of the extracted spectrum. This is particularly helpful if there is no clear detection of the line in the raw images.
 
@@ -36,4 +36,4 @@ The code is fully documented included Juypter Notebook tutorials to demonstrate 
 
 # Acknowledgements
 
-I would like to thank Ryan Loomis for helpful discussions on the implementation of this method.
+I would like to thank Ryan Loomis for helpful discussions on the implementation of this method. R.T. was supported by NSF grant AST-1514670 and NASA NNX16AB48G.
