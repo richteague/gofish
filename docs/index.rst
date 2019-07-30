@@ -40,6 +40,7 @@ We would strongly recommend using ``VISIBLE`` (`Loomis et al. 2017`_), which is 
 
    user/api
    user/fishing_basics
+   user/fishing_advanced
 
 .. General operations for integrated spectra help
 
