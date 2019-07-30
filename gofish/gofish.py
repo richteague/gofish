@@ -27,9 +27,9 @@ class imagecube:
 
     def average_spectrum(self, r_min=None, r_max=None, dr_bin=None, x0=0.0,
                          y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
-                         phi=1.0, mstar=1.0, dist=100., resample=1,
-                         beam_spacing=False, PA_min=None, PA_max=None,
-                         exclude_PA=False, unit='Jy/beam'):
+                         phi=1.0, z_func=None, mstar=1.0, dist=100.,
+                         resample=1, beam_spacing=False, PA_min=None,
+                         PA_max=None, exclude_PA=False, unit='Jy/beam'):
         """
         Return the averaged spectrum over a given radial range, returning a
         spectrum in units of [Jy/beam] or [K] using the Rayleigh-Jeans
@@ -64,6 +64,9 @@ class imagecube:
             z1 (Optional[float]): Correction to emission height at 1" in
                 [arcsec].
             phi (Optional[float]): Flaring angle correction term.
+            z_func (Optional[function]): A function which provides
+                :math:`z(r)`. Note that no checking will occur to make sure
+                this is a valid function.
             mstar (Optional[float]): Stellar mass in [Msun].
             dist (Optional[float]): Distance to the source in [pc].
             resample(Optional[float/int]): Resampling parameter for the
@@ -149,13 +152,13 @@ class imagecube:
 
     def integrated_spectrum(self, r_min=None, r_max=None, dr_bin=None, x0=0.0,
                             y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
-                            phi=1.0, mstar=1.0, dist=100., resample=1,
-                            beam_spacing=False, PA_min=None, PA_max=None,
-                            exclude_PA=False):
+                            phi=1.0, z_func=None, mstar=1.0, dist=100.,
+                            resample=1, beam_spacing=False, PA_min=None,
+                            PA_max=None, exclude_PA=False):
         """
         Return the integrated spectrum over a given radial range, returning a
         spectrum in units of [Jy].
-        
+
         The `resample` parameter allows you to resample the
         spectrum at a different velocity spacing (by providing a float
         argument) or averaging of an integer number of channels (by providing
@@ -185,6 +188,9 @@ class imagecube:
             z1 (Optional[float]): Correction to emission height at 1" in
                 [arcsec].
             phi (Optional[float]): Flaring angle correction term.
+            z_func (Optional[function]): A function which provides
+                :math:`z(r)`. Note that no checking will occur to make sure
+                this is a valid function.
             mstar (Optional[float]): Stellar mass in [Msun].
             dist (Optional[float]): Distance to the source in [pc].
             resample(Optional[float/int]): Resampling parameter for the
@@ -214,7 +220,7 @@ class imagecube:
         x, y, dy = self.average_spectrum(r_min=r_min, r_max=r_max,
                                          dr_bin=dr_bin, x0=x0, y0=y0, inc=inc,
                                          PA=PA, z0=z0, psi=psi, z1=z1, phi=phi,
-                                         mstar=mstar, dist=dist,
+                                         z_func=z_func, mstar=mstar, dist=dist,
                                          resample=resample,
                                          beam_spacing=beam_spacing,
                                          PA_min=PA_min, PA_max=PA_max,
@@ -523,6 +529,11 @@ class imagecube:
         disk, ``z0=0.0``, while for a conical disk, as described in `Rosenfeld
         et al. (2013)`_, ``psi=1.0``. Typically ``z1`` is not needed unless the
         data is exceptionally high SNR and well spatially resolved.
+
+        It is also possible to override this parameterization and directly
+        provide a user-defined ``z_func``. This allow for highly complex
+        surfaces to be included. If this is provided, the other height
+        parameters are ignored.
 
         .. _Rosenfeld et al. (2013): https://ui.adsabs.harvard.edu/abs/2013ApJ...774...16R/
 

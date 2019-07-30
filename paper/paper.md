@@ -32,7 +32,7 @@ The aim of `GoFish` is provide the functionality to perform such analyses and ma
 
 Using known properties of the disk, namely the inclination and position angle of the disk and the distance and mass of the mass of the central star, averaged or integrated spectra over a specified radial range can be extracted. In addition, a convenience function `find_center` is provided which searches for the disk center based on maximising the signal-to-noise ratio of the extracted spectrum. This is particularly helpful if there is no clear detection of the line in the raw images.
 
-The code is fully documented included Juypter Notebook tutorials to demonstrate the functions and their syntax. These run using publicly available data cubes and are thus easy to replicate.
+The code is fully documented, including Juypter Notebook tutorials to demonstrate the functions and their syntax. These are run using publicly available data cubes and are thus easy to replicate.
 
 # Acknowledgements
 
