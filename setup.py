@@ -16,6 +16,7 @@ setuptools.setup(
     install_requires=[
         "numpy",
         "astropy",
-        "scipy"
+        "scipy",
+        "astro-eddy",
       ]
 )

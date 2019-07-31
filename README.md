@@ -1,3 +1,5 @@
+# GoFish
+<bR>
 <p align='center'>
   <br/>
   <img src="https://github.com/richteague/gofish/blob/master/docs/_static/logo.png" width="596" height="527"><br/>
@@ -11,3 +13,19 @@
       <img src='https://readthedocs.org/projects/fishing/badge/?version=latest' alt='Documentation Status' />
   </a>
 </p>
+
+<br>
+------
+<br>
+
+### Installation
+
+The quickest way to install is using PyPI:
+
+`> pip install gofish`
+
+which will install all the necessary dependancies.
+
+### Citation
+
+Coming soon.
