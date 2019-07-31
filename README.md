@@ -2,7 +2,7 @@
 
 <p align='center'>
   <br/>
-  <img src="https://github.com/richteague/gofish/blob/master/docs/_static/logo.png" width="397.5" height="351.5"><br/>
+  <img src="https://github.com/richteague/gofish/blob/master/docs/_static/logo.png" width="596" height="527"><br/>
   <br>
   Fishing for molecular line detections in protoplanetary disks.
   <br>
