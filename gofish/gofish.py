@@ -119,6 +119,9 @@ class imagecube:
         unit = unit.lower()
         if unit not in ['jy/beam', 'k']:
             raise ValueError("Unknown `unit`.")
+        if resample < 1.0:
+            print('WARNING: `resample < 1`, are you sure you want channels '
+                  + 'more narrow than 1 m/s?')
 
         # Get the deprojected spectrum for each annulus.
         spectra, scatter = [], []
