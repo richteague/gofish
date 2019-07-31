@@ -91,9 +91,10 @@ class imagecube:
                 sub-mm wavelengths.
 
         Returns:
-            velax (array): Velocity axis in [m/s] with the requested sampling
-                rate from `resample`.
-            spectrum (array): Integrated spectrum in [Jy].
+            The velocity axis of the spectrum, ``velax``, in [m/s], the
+            averaged spectrum, ``spectrum``, and the uncertainty on the
+            spectrum, ``scatter``. The latter two are in units of either
+            [Jy/beam] or [K] depending on the ``unit``.
 
         """
 
