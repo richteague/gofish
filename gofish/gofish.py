@@ -321,7 +321,7 @@ class imagecube:
         y_tmp = np.where(np.logical_and(mask, np.isfinite(y)), y, 0.0)
         return np.trapz(y_tmp, x=x) / np.nanstd(y[~mask])
 
-    def _peak_SNR(self, x, y, dy, mask):
+    def _peak_SNR(self, x, y, mask):
         """SNR based on the peak of the spectrum."""
         y_tmp = np.where(np.logical_and(mask, np.isfinite(y)), y, 0.0)
         return np.max(y_tmp) / np.nanstd(y[~mask])
@@ -818,7 +818,6 @@ class imagecube:
         ax.set_aspect(1)
         ax.set_xlim(x0s[-1], x0s[0])
         ax.set_ylim(y0s[0], y0s[-1])
-        ax.tick_params(which='both', right=1, top=1)
         ax.set_xlabel('Offset (arcsec)')
         ax.set_ylabel('Offset (arcsec)')
         self._plot_beam(ax=ax)
