@@ -215,10 +215,9 @@ class imagecube:
                 ``PA_min <= PA_pix <= PA_max``.
 
         Returns:
-            velax (array): Velocity axis in [m/s] with the requested sampling
-                rate from `resample`.
-            spectrum (array): Integrated spectrum in [Jy].
-            scatter (array): Weighted scatter in each velocity bin [Jy].
+            The velocity axis of the spectrum, ``velax``, in [m/s], the
+            integrated spectrum, ``spectrum``, and the uncertainty on the
+            spectrum, ``scatter``. The latter two are in units of [Jy].
 
         """
         x, y, dy = self.average_spectrum(r_min=r_min, r_max=r_max,
@@ -266,9 +265,8 @@ class imagecube:
                 relative to the SNR at ``(x0, y0) =  (0, 0)``.
 
         Returns:
-            x0s (array): Array of ``x0`` values considered.
-            y0s (array): Array of ``y0`` values considered.
-            SNR (array): 2D array of the SNR values.
+            The axes of the grid search, ``x0s`` and ``y0s``, as well as the
+            2D array of SNR values, ``SNR``.
         """
 
         # Verify the SNR method.
@@ -406,11 +404,10 @@ class imagecube:
                 from `eddy`. Requires `eddy` to be installed.
 
         Returns:
-            spectra (ndarray): The spectra from each pixel in the annulus.
-            theta (ndarray): The midplane polar angles in [radians] of each of
-                the returned spectra.
-            ensemble (annulus instance): An `eddy` annulus instance if
-                as_ensemble == True.
+            If ``annulus=True``, will return an ``eddy.annulus`` instance,
+            otherwise will be an array containing the polar angles of each
+            spectrum in [degrees] and the array of spectra, ordered in
+            increasing polar angle.
         """
 
         # Flatten the data.
@@ -557,16 +554,16 @@ class imagecube:
                 emission surface. Should be opposite sign to ``z0``.
             phi (Optional[float]): Flaring angle correction term for the
                 emission surface.
-            frame (Optional[str]): Frame of reference for the returned
-                coordinates. Either ``'polar'`` or ``'cartesian'``.
             z_func (Optional[function]): A function which provides
                 :math:`z(r)`. Note that no checking will occur to make sure
                 this is a valid function.
+            frame (Optional[str]): Frame of reference for the returned
+                coordinates. Either ``'polar'`` or ``'cartesian'``.
 
         Returns:
-            c1 (ndarryy): Either r (cylindrical) or x depending on the frame.
-            c2 (ndarray): Either theta or y depending on the frame.
-            c3 (ndarray): Height above the midplane, z.
+            Three coordinate arrays, either the cylindrical coordaintes,
+            ``(r, theta, z)`` or cartestian coordinates, ``(x, y, z)``,
+            depending on ``frame``.
         """
 
         # Check the input variables.
