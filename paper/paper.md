@@ -10,7 +10,7 @@ authors:
 affiliations:
  - name: Department of Astronomy, University of Michigan, 1085 S. University Ave., Ann Arbor, MI 48109, USA
    index: 1
-date: XX August 2019
+date: 02 August 2019
 bibliography: paper.bib
 ---
 
