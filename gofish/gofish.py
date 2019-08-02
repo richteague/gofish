@@ -234,7 +234,7 @@ class imagecube:
         return x, y * nbeams, dy * nbeams
 
     def find_center(self, dx=None, dy=None, Nx=None, Ny=None, mask=None,
-                    v_min=None, v_max=None, spectrum='avg', SNR='int',
+                    v_min=None, v_max=None, spectrum='avg', SNR='peak',
                     normalize=True, **kwargs):
         """
         Find the source center (assuming the disk is azimuthally symmetric) by
@@ -305,26 +305,28 @@ class imagecube:
         v_min = np.percentile(x, [40.])[0] if v_min is None else v_min
         v_max = np.percentile(x, [60.])[0] if v_max is None else v_max
         mask = np.logical_and(x >= v_min, x <= v_max) if mask is None else mask
+        if mask.size != x.size:
+            raise ValueError("`mask` is not the same size as expected v-axis.")
 
         # Loop through the possible centers.
         for i, x0 in enumerate(x0s):
             for j, y0 in enumerate(y0s):
-                x, y, _ = spectrum_func(x0=x0, y0=y0, **kwargs)
-                SNR[j, i] = SNR_func(x, y, mask)
+                x, y, dy = spectrum_func(x0=x0, y0=y0, **kwargs)
+                SNR[j, i] = SNR_func(x, y, dy, mask)
 
         # Determine the optimum position.
         self._plot_center(x0s, y0s, SNR, normalize)
         return x0s, y0s, SNR
 
-    def _integrated_SNR(self, x, y, mask):
+    def _integrated_SNR(self, x, y, dy, mask):
         """SNR based on the integrated spectrum."""
         y_tmp = np.where(np.logical_and(mask, np.isfinite(y)), y, 0.0)
-        return np.trapz(y_tmp, x=x) / np.nanstd(y[~mask])
+        return np.trapz(y_tmp, x=x) / np.nanmean(dy[~mask])
 
-    def _peak_SNR(self, x, y, mask):
+    def _peak_SNR(self, x, y, dy, mask):
         """SNR based on the peak of the spectrum."""
         y_tmp = np.where(np.logical_and(mask, np.isfinite(y)), y, 0.0)
-        return np.max(y_tmp) / np.nanstd(y[~mask])
+        return np.max(y_tmp) / np.nanmean(dy[~mask])
 
     def _keplerian(self, rvals, mstar=1.0, dist=100., inc=90.0, z0=0.0,
                    psi=1.0, z1=0.0, phi=1.0):

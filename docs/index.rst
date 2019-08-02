@@ -33,6 +33,8 @@ Simply use PyPI with:
 
 which should install the necessary dependencies. If you have any trouble installing, please `raise an issue`_.
 
+If the installation went to plan you should be able to run the tutorial notebooks.
+
 Fishing in *uv* Space
 ^^^^^^^^^^^^^^^^^^^^^
 
@@ -59,4 +61,5 @@ We would strongly recommend using ``VISIBLE`` (`Loomis et al. 2017`_), which is 
 .. _Teague et al. (2018a): https://ui.adsabs.harvard.edu/abs/2018ApJ...860L..12T
 .. _Teague et al. (2018b): https://ui.adsabs.harvard.edu/abs/2018ApJ...868..113T
 .. _Teague 2019: https://ui.adsabs.harvard.edu/abs/2019JOSS....4.1220T
+.. _tutorial notebooks: https://github.com/richteague/gofish/tree/master/docs/user
 .. _Yen et al. (2016): https://ui.adsabs.harvard.edu/abs/2016ApJ...832..204Y
