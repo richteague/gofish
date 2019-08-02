@@ -680,6 +680,7 @@ class imagecube:
                 self.bmin = self.header['bmin'] * 3600.
                 self.bpa = self.header['bpa']
         except Exception:
+            print("WARNING: No beam values found. Assuming pixel scale.")
             self.bmaj = self.dpix
             self.bmin = self.dpix
             self.bpa = 0.0
