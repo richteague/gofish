@@ -9,6 +9,8 @@
   For more information, read the documentation.
   <br>
   <br>
+  <a href="http://joss.theoj.org/papers/f2808d0c1cc0ffb51aa60466c896ed06">
+      <img src="http://joss.theoj.org/papers/f2808d0c1cc0ffb51aa60466c896ed06/status.svg"></a>
   <a href='https://fishing.readthedocs.io/en/latest/?badge=latest'>
       <img src='https://readthedocs.org/projects/fishing/badge/?version=latest' alt='Documentation Status' />
   </a>
