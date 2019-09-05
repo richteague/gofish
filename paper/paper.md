@@ -24,7 +24,7 @@ $$\delta v(r,\, \theta) = v_{\rm rot}(r) \cos (\theta) \sin (i)$$
 
 where $i$ is the inclination of the disk. Thus, if $v_{\rm rot}(r)$ is known, then this shift can be accounted for by correcting each spectrum before stacking.
 
-This method was first described in `@Yen:2016`, however other groups were using similar techniques, such as `@Teague:2016` and `@Matra:2017`. A recently published code, `eddy` `[@Teague:2019]`, inverts this method to use strongly detected line emission in infer the rotation profile.
+This method was first described in [@Yen:2016], however other groups were using similar techniques, such as [@Teague:2016] and [@Matra:2017]. A recently published code, `eddy` [@Teague:2019], inverts this method to use strongly detected line emission in infer the rotation profile.
 
 # Code Summary
 
