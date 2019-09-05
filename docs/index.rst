@@ -42,6 +42,11 @@ Fishing in *uv* Space
 
 We would strongly recommend using ``VISIBLE`` (`Loomis et al. 2017`_), which is a match-filtering approach to finding weak line emission. This has the significant advantage of not requiring any imaging as it works directly on the measurement sets and avoids any issues with correlated noise.
 
+Community Guidelines
+^^^^^^^^^^^^^^^^^^^^
+
+`GoFish` is being actively developed on `GitHub`_. If you find any bugs, or want to suggest any improvements, please follow the `contributing guide`_ and open an issue.
+
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
@@ -53,7 +58,9 @@ We would strongly recommend using ``VISIBLE`` (`Loomis et al. 2017`_), which is 
 .. General operations for integrated spectra help
 
 .. References ..
+.. _contributing guide: https://github.com/richteague/gofish/blob/master/CONTRIBUTING.md
 .. _GitHub link: https://github.com/richteague/eddy
+.. _GitHub: https://github.com/richteague/gofish
 .. _Loomis et al. 2017: https://ui.adsabs.harvard.edu/abs/2018AJ....155..182L
 .. _Matra et al. (2017): https://ui.adsabs.harvard.edu/abs/2017ApJ...842....9M
 .. _raise an issue: https://github.com/richteague/gofish/issues
