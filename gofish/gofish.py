@@ -29,7 +29,8 @@ class imagecube:
                          y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
                          phi=1.0, z_func=None, mstar=1.0, dist=100.,
                          resample=1, beam_spacing=False, PA_min=None,
-                         PA_max=None, exclude_PA=False, unit='Jy/beam'):
+                         PA_max=None, exclude_PA=False, unit='Jy/beam',
+                         assume_correlated=True):
         """
         Return the averaged spectrum over a given radial range, returning a
         spectrum in units of [Jy/beam] or [K] using the Rayleigh-Jeans
@@ -42,6 +43,14 @@ class imagecube:
         velocity axis which has been supersampled such that a channel is three
         times as narrow as the intrinsic width. Instead, ``resample=50.0`` will
         result in a velocity axis with a channel spacing of 50 m/s.
+
+        .. note::
+
+            The third variable returned is the scatter in each velocity bin and
+            not the uncertainty on the bin mean as the data is not strictly
+            independent due to spectral and spatial correlations in the data.
+            If you want to assume uncorrelated data to get a better estimate of
+            the uncertainty, set ``assumed_correlated=False``.
 
         Args:
             r_min (Optional[float]): Inner radius in [arcsec] of the region to
@@ -89,12 +98,17 @@ class imagecube:
                 or ``'K'``. Note that the conversion to Kelvin assumes the
                 Rayleigh-Jeans approximation which is typically invalid at
                 sub-mm wavelengths.
+            assume_correlated (Optional[bool]): Whether to treat the spectra
+                which are stacked as correlated, by default this is
+                ``True``. If ``False``, the uncertainty will be estimated using
+                Poisson statistics, otherwise the uncertainty is just the
+                standard deviation of each velocity bin.
 
         Returns:
             The velocity axis of the spectrum, ``velax``, in [m/s], the
-            averaged spectrum, ``spectrum``, and the uncertainty on the
-            spectrum, ``scatter``. The latter two are in units of either
-            [Jy/beam] or [K] depending on the ``unit``.
+            averaged spectrum, ``spectrum``, and the variance of the velocity
+            bin, ``scatter``. The latter two are in units of either [Jy/beam]
+            or [K] depending on the ``unit``.
 
         """
 
@@ -147,6 +161,11 @@ class imagecube:
 
         # Uncertainty propagation.
         scatter = np.average(scatter, axis=0, weights=weights)
+        if not assume_correlated:
+            N = annulus.theta.size * np.diff(x).mean() / self.chan
+            if not beam_spacing:
+                N *= self.dpix**2 / self._calculate_beam_area_arcsec()
+            scatter /= np.sqrt(N)
 
         # Convert to K using RJ-approximation.
         if unit == 'k':
@@ -158,7 +177,8 @@ class imagecube:
                             y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
                             phi=1.0, z_func=None, mstar=1.0, dist=100.,
                             resample=1, beam_spacing=False, PA_min=None,
-                            PA_max=None, exclude_PA=False):
+                            PA_max=None, exclude_PA=False,
+                            assume_correlated=False):
         """
         Return the integrated spectrum over a given radial range, returning a
         spectrum in units of [Jy].
@@ -170,6 +190,14 @@ class imagecube:
         velocity axis which has been supersampled such that a channel is three
         times as narrow as the intrinsic width. Instead, ``resample=50.0`` will
         result in a velocity axis with a channel spacing of 50 m/s.
+
+        .. note::
+
+            The third variable returned is the scatter in each velocity bin and
+            not the uncertainty on the bin mean as the data is not strictly
+            independent due to spectral and spatial correlations in the data.
+            If you want to assume uncorrelated data to get a better estimate of
+            the uncertainty, set ``assumed_correlated=False``.
 
         Args:
             r_min (Optional[float]): Inner radius in [arcsec] of the region to
@@ -213,11 +241,16 @@ class imagecube:
                 the sky-plane.
             exclude_PA (Optional[bool]): Whether to exclude pixels where
                 ``PA_min <= PA_pix <= PA_max``.
+            assume_correlated (Optional[bool]): Whether to treat the spectra
+                which are stacked as correlated, by default this is
+                ``True``. If ``False``, the uncertainty will be estimated using
+                Poisson statistics, otherwise the uncertainty is just the
+                standard deviation of each velocity bin.
 
         Returns:
             The velocity axis of the spectrum, ``velax``, in [m/s], the
-            integrated spectrum, ``spectrum``, and the uncertainty on the
-            spectrum, ``scatter``. The latter two are in units of [Jy].
+            integrated spectrum, ``spectrum``, and the variance of the velocity
+            bin, ``scatter``. The latter two are in units of [Jy].
 
         """
         x, y, dy = self.average_spectrum(r_min=r_min, r_max=r_max,
@@ -227,7 +260,8 @@ class imagecube:
                                          resample=resample,
                                          beam_spacing=beam_spacing,
                                          PA_min=PA_min, PA_max=PA_max,
-                                         exclude_PA=exclude_PA)
+                                         exclude_PA=exclude_PA,
+                                         assume_correlated=assume_correlated)
         nbeams = np.pi * (r_max**2 - r_min**2)
         nbeams /= self._calculate_beam_area_arcsec()
         return x, y * nbeams, dy * nbeams
