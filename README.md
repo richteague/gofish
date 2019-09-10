@@ -10,9 +10,13 @@
   <br>
   <br>
   <a href="http://joss.theoj.org/papers/f2808d0c1cc0ffb51aa60466c896ed06">
-      <img src="http://joss.theoj.org/papers/f2808d0c1cc0ffb51aa60466c896ed06/status.svg"></a>
+      <img src="http://joss.theoj.org/papers/f2808d0c1cc0ffb51aa60466c896ed06/status.svg">
+  </a>
   <a href='https://fishing.readthedocs.io/en/latest/?badge=latest'>
       <img src='https://readthedocs.org/projects/fishing/badge/?version=latest' alt='Documentation Status' />
+  </a>
+  <a href="https://zenodo.org/badge/latestdoi/199306909">
+      <img src="https://zenodo.org/badge/199306909.svg" alt="DOI">
   </a>
 </p>
 
