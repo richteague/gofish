@@ -65,4 +65,20 @@ where `y` is now the integrated flux in units of Jy.
 
 ### Citation
 
-Coming soon.
+If you use `GoFish` as part of your research, please cite the [JOSS article](https://doi.org/10.21105/joss.01632):
+
+```tex
+@article{GoFish,
+    doi = {10.21105/joss.01632},
+    url = {https://doi.org/10.21105/joss.01632},
+    year = {2019},
+    month = {sep},
+    publisher = {The Open Journal},
+    volume = {4},
+    number = {41},
+    pages = {1632},
+    author = {Richard Teague},
+    title = {GoFish: Fishing for Line Observations in Protoplanetary Disks},
+    journal = {The Journal of Open Source Software}
+}
+```
