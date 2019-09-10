@@ -83,6 +83,7 @@ Community Guidelines
 .. _contributing guide: https://github.com/richteague/gofish/blob/master/CONTRIBUTING.md
 .. _GitHub link: https://github.com/richteague/eddy
 .. _GitHub: https://github.com/richteague/gofish
+.. _JOSS article: https://doi.org/10.21105/joss.01632
 .. _Loomis et al. 2017: https://ui.adsabs.harvard.edu/abs/2018AJ....155..182L
 .. _Matra et al. (2017): https://ui.adsabs.harvard.edu/abs/2017ApJ...842....9M
 .. _raise an issue: https://github.com/richteague/gofish/issues
