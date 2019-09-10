@@ -42,6 +42,28 @@ Fishing in *uv* Space
 
 We would strongly recommend using ``VISIBLE`` (`Loomis et al. 2017`_), which is a match-filtering approach to finding weak line emission. This has the significant advantage of not requiring any imaging as it works directly on the measurement sets and avoids any issues with correlated noise.
 
+Citation
+^^^^^^^^
+
+If you use `GoFish` as part of your research, please cite the `JOSS article`_:
+
+.. code-block:: tex
+
+    @article{GoFish,
+        doi = {10.21105/joss.01632},
+        url = {https://doi.org/10.21105/joss.01632},
+        year = {2019},
+        month = {sep},
+        publisher = {The Open Journal},
+        volume = {4},
+        number = {41},
+        pages = {1632},
+        author = {Richard Teague},
+        title = {GoFish: Fishing for Line Observations in Protoplanetary Disks},
+        journal = {The Journal of Open Source Software}
+    }
+
+
 Community Guidelines
 ^^^^^^^^^^^^^^^^^^^^
 
