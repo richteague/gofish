@@ -22,7 +22,7 @@ copyright = '2019, Richard Teague'
 author = 'Richard Teague'
 
 # The full version, including alpha/beta/rc tags
-release = 'v0.1'
+release = 'v1.0.0'
 
 
 # -- General configuration ---------------------------------------------------
