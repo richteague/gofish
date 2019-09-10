@@ -63,6 +63,7 @@ If you use `GoFish` as part of your research, please cite the `JOSS article`_:
         journal = {The Journal of Open Source Software}
     }
 
+as well as any of the above referenced papers for the method.
 
 Community Guidelines
 ^^^^^^^^^^^^^^^^^^^^
