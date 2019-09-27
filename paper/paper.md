@@ -37,3 +37,5 @@ The code is fully documented, including Juypter Notebook tutorials to demonstrat
 # Acknowledgements
 
 I would like to thank Ryan Loomis for helpful discussions on the implementation of this method. R.T. was supported by NSF grant AST-1514670 and NASA NNX16AB48G.
+
+# References
