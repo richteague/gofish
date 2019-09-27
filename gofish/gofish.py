@@ -343,8 +343,11 @@ class imagecube:
         # Loop through the possible centers.
         for i, x0 in enumerate(x0s):
             for j, y0 in enumerate(y0s):
-                x, y, dy = spectrum_func(x0=x0, y0=y0, **kwargs)
-                SNR[j, i] = SNR_func(x, y, dy, mask)
+                try:
+                    x, y, dy = spectrum_func(x0=x0, y0=y0, **kwargs)
+                    SNR[j, i] = SNR_func(x, y, dy, mask)
+                except:
+                    SNR[j, i] = np.nan
 
         # Determine the optimum position.
         self._plot_center(x0s, y0s, SNR, normalize)
@@ -825,7 +828,10 @@ class imagecube:
         import matplotlib.pyplot as plt
 
         # Find the center.
+        SNR_mask = np.isfinite(SNR)
+        SNR = np.where(SNR_mask, SNR, -1e10)
         yidx, xidx = np.unravel_index(SNR.argmax(), SNR.shape)
+        SNR = np.where(SNR_mask, SNR, np.nan)
         x0, y0 = x0s[xidx], y0s[yidx]
         print('Peak SNR at (x0, y0) = ({:.2f}", {:.2f}").'.format(x0, y0))
 
