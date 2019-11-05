@@ -376,10 +376,10 @@ class imagecube:
 
             - ``'Jy m/s'``: Integrated spectrum in units of [Jy m/s].
             - ``'K m/s'``: Inegrated spectrum in units of [K m/s] where the
-                conversion to [K] was calculated using the full Planck law.
+            conversion to [K] was calculated using the full Planck law.
             - ``'Jy'``: The peak of the integrated spectrum in [Jy].
             - ``'K'``: The peak of the averaged spectrum in [K] where the
-                conversion to [k] was calculated using the full Planck law.
+            conversion to [k] was calculated using the full Planck law.
             - ``'Jy/beam'`` - The peak of the averaged spectrum in [Jy/beam].
 
         For other units, use the ``radial_spectra`` function.
