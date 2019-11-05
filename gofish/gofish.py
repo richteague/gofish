@@ -109,7 +109,6 @@ class imagecube:
             averaged spectrum, ``spectrum``, and the variance of the velocity
             bin, ``scatter``. The latter two are in units of either [Jy/beam]
             or [K] depending on the ``unit``.
-
         """
 
         # Radial sampling. Try to get as close to r_bin as possible.
@@ -120,8 +119,7 @@ class imagecube:
             print("WARNING: Setting `r_min = cube.dpix` for safety.")
         r_max = r_tmp[-1] if r_max is None else r_max
         dr_bin = 0.25 * self.bmaj if dr_bin is None else dr_bin
-        if (r_max - r_min) < dr_bin:
-            raise ValueError("`r_bin` is larger than `r_max - r_min`.")
+        dr_bin = min((r_max - r_min), dr_bin)
         n_bin = int(np.ceil((r_max - r_min) / dr_bin))
         rvals = np.linspace(r_min, r_max, n_bin)
         rbins, _ = self.radial_sampling(rvals=rvals)
@@ -129,6 +127,7 @@ class imagecube:
         # Keplerian velocity at the annulus centers.
         v_kep = self._keplerian(rvals=rvals, mstar=mstar, dist=dist, inc=inc,
                                 z0=z0, psi=psi, z1=z1, phi=phi)
+        v_kep = np.atleast_1d(v_kep)
 
         # Output unit.
         unit = unit.lower()
@@ -169,8 +168,8 @@ class imagecube:
 
         # Convert to K using RJ-approximation.
         if unit == 'k':
-            spectrum = self._jybeam_to_Tb(spectrum)
-            scatter = self._jybeam_to_Tb(scatter)
+            spectrum = self.jybeam_to_Tb(spectrum)
+            scatter = self.jybeam_to_Tb(scatter)
         return x, spectrum, scatter
 
     def integrated_spectrum(self, r_min=None, r_max=None, dr_bin=None, x0=0.0,
@@ -265,6 +264,214 @@ class imagecube:
         nbeams = np.pi * (r_max**2 - r_min**2)
         nbeams /= self._calculate_beam_area_arcsec()
         return x, y * nbeams, dy * nbeams
+
+    def radial_spectra(self, rvals=None, rbins=None, x0=0.0, y0=0.0, inc=0.0,
+                       PA=0.0, z0=0.0, psi=1.0, z1=0.0, phi=1.0, z_func=None,
+                       mstar=1.0, dist=100., resample=1, beam_spacing=False,
+                       PA_min=None, PA_max=None, exclude_PA=None,
+                       assume_correlated=True, unit='Jy'):
+        """
+        Return shifted and stacked spectra, either integrated flux or average
+        spectrum, along the provided radial profile.
+
+        Args:
+            rvals (Optional[floats]): Array of bin centres for the profile in
+                [arcsec]. You need only specify one of ``rvals`` and ``rbins``.
+            rbins (Optional[floats]): Array of bin edges for the profile in
+                [arcsec]. You need only specify one of ``rvals`` and ``rbins``.
+            x0 (Optional[float]): Source center offset along the x-axis in
+                [arcsec].
+            y0 (Optional[float]): Source center offset along the y-axis in
+                [arcsec].
+            inc (Optional[float]): Inclination of the disk in [degrees].
+            PA (Optional[float]): Position angle of the disk in [degrees],
+                measured east-of-north towards the redshifted major axis.
+            z0 (Optional[float]): Emission height in [arcsec] at a radius of
+                1".
+            psi (Optional[float]): Flaring angle of the emission surface.
+            z1 (Optional[float]): Correction to emission height at 1" in
+                [arcsec].
+            phi (Optional[float]): Flaring angle correction term.
+            z_func (Optional[function]): A function which provides
+                :math:`z(r)`. Note that no checking will occur to make sure
+                this is a valid function.
+            mstar (Optional[float]): Stellar mass in [Msun].
+            dist (Optional[float]): Distance to the source in [pc].
+            resample(Optional[float/int]): Resampling parameter for the
+                deprojected spectrum. An integer specifies an average of that
+                many channels, while a float specifies the desired channel
+                width. Default is ``resample=1``.
+            beam_spacing(Optional[bool]): When extracting the annuli, whether
+                to choose spatially independent pixels or not.
+            PA_min (Optional[float]): Minimum polar angle to include in the
+                annulus in [degrees]. Note that the polar angle is measured in
+                the disk-frame, unlike the position angle which is measured in
+                the sky-plane.
+            PA_max (Optional[float]): Maximum polar angleto include in the
+                annulus in [degrees]. Note that the polar angle is measured in
+                the disk-frame, unlike the position angle which is measured in
+                the sky-plane.
+            exclude_PA (Optional[bool]): Whether to exclude pixels where
+                ``PA_min <= PA_pix <= PA_max``.
+            assume_correlated (Optional[bool]): Whether to treat the spectra
+                which are stacked as correlated, by default this is
+                ``True``. If ``False``, the uncertainty will be estimated using
+                Poisson statistics, otherwise the uncertainty is just the
+                standard deviation of each velocity bin.
+            unit (Optional[str]): Desired unit of the output spectrum, from
+                ``'Jy'``, ``'Jy/beam'`` or ``'K'``.
+
+        Returns:
+            An array of the bin centers, ``rvals``, and an array of deprojected
+            spectra. This will have shape (M, 3, N) where M is the number of
+            radial samples, ``rvals.size`` and N is the number of channels,
+            ``velax.size`` if ``resample=1``. The three arrays are the velocity
+            axis in [m/s], the spectrum, in either [Jy] or [Jy/beam] depending
+            on the choice of ``spectrum``, and the uncertainty in the same
+            units.
+        """
+        # Radial sampling.
+        rbins, rvals = self.radial_sampling(rbins=rbins, rvals=rvals)
+
+        # Define the correct function.
+        if unit.lower() == 'jy/beam' or unit.lower() == 'k':
+            func = self.average_spectrum
+        elif unit.lower() == 'jy':
+            func = self.integrated_spectrum
+        else:
+            raise ValueError("Unknown ``unit`` value.")
+
+        # Cycle through and deproject the spectra.
+        spectra = []
+        for r_min, r_max in zip(rbins[:-1], rbins[1:]):
+            if unit.lower() == 'jy':
+                spectra += [func(r_min=r_min, r_max=r_max, x0=x0, y0=y0,
+                                 inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
+                                 phi=phi, z_func=z_func, mstar=mstar,
+                                 dist=dist, resample=resample,
+                                 beam_spacing=beam_spacing, PA_min=PA_min,
+                                 PA_max=PA_max, exclude_PA=exclude_PA,
+                                 assume_correlated=assume_correlated)]
+            else:
+                spectra += [func(r_min=r_min, r_max=r_max, x0=x0, y0=y0,
+                                 inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
+                                 phi=phi, z_func=z_func, mstar=mstar,
+                                 dist=dist, resample=resample,
+                                 beam_spacing=beam_spacing, PA_min=PA_min,
+                                 PA_max=PA_max, exclude_PA=exclude_PA,
+                                 assume_correlated=assume_correlated,
+                                 unit=unit)]
+        return rvals, np.squeeze(spectra)
+
+
+    def radial_profile(self, rvals=None, rbins=None, unit='Jy m/s', x0=0.0,
+                       y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
+                       phi=1.0, z_func=None, mstar=1.0, dist=100., resample=1,
+                       beam_spacing=False, PA_min=None, PA_max=None,
+                       exclude_PA=False, assume_correlated=True):
+        """
+        Generate a radial profile from shifted and stacked spectra. There are
+        different ways to collapse the spectrum into a single value using the
+        ``unit`` argument:
+
+            - ``'Jy m/s'``: Integrated spectrum in units of [Jy m/s].
+            - ``'K m/s'``: Inegrated spectrum in units of [K m/s] where the
+                conversion to [K] was calculated using the full Planck law.
+            - ``'Jy'``: The peak of the integrated spectrum in [Jy].
+            - ``'K'``: The peak of the averaged spectrum in [K] where the
+                conversion to [k] was calculated using the full Planck law.
+            - ``'Jy/beam'`` - The peak of the averaged spectrum in [Jy/beam].
+
+        For other units, use the ``radial_spectra`` function.
+
+        Args:
+            rvals (Optional[floats]): Array of bin centres for the profile in
+                [arcsec]. You need only specify one of ``rvals`` and ``rbins``.
+            rbins (Optional[floats]): Array of bin edges for the profile in
+                [arcsec]. You need only specify one of ``rvals`` and ``rbins``.
+            unit (Optional[str]): Unit for the y-axis of the profile, as
+                in the function description.
+            x0 (Optional[float]): Source center offset along the x-axis in
+                [arcsec].
+            y0 (Optional[float]): Source center offset along the y-axis in
+                [arcsec].
+            inc (Optional[float]): Inclination of the disk in [degrees].
+            PA (Optional[float]): Position angle of the disk in [degrees],
+                measured east-of-north towards the redshifted major axis.
+            z0 (Optional[float]): Emission height in [arcsec] at a radius of
+                1".
+            psi (Optional[float]): Flaring angle of the emission surface.
+            z1 (Optional[float]): Correction to emission height at 1" in
+                [arcsec].
+            phi (Optional[float]): Flaring angle correction term.
+            z_func (Optional[function]): A function which provides
+                :math:`z(r)`. Note that no checking will occur to make sure
+                this is a valid function.
+            mstar (Optional[float]): Stellar mass in [Msun].
+            dist (Optional[float]): Distance to the source in [pc].
+            resample(Optional[float/int]): Resampling parameter for the
+                deprojected spectrum. An integer specifies an average of that
+                many channels, while a float specifies the desired channel
+                width. Default is ``resample=1``.
+            beam_spacing(Optional[bool]): When extracting the annuli, whether
+                to choose spatially independent pixels or not.
+            PA_min (Optional[float]): Minimum polar angle to include in the
+                annulus in [degrees]. Note that the polar angle is measured in
+                the disk-frame, unlike the position angle which is measured in
+                the sky-plane.
+            PA_max (Optional[float]): Maximum polar angleto include in the
+                annulus in [degrees]. Note that the polar angle is measured in
+                the disk-frame, unlike the position angle which is measured in
+                the sky-plane.
+            exclude_PA (Optional[bool]): Whether to exclude pixels where
+                ``PA_min <= PA_pix <= PA_max``.
+            assume_correlated (Optional[bool]): Whether to treat the spectra
+                which are stacked as correlated, by default this is
+                ``True``. If ``False``, the uncertainty will be estimated using
+                Poisson statistics, otherwise the uncertainty is just the
+                standard deviation of each velocity bin.
+            unit (Optional[str]): Desired unit of the output spectrum, from
+                ``'Jy'``, ``'Jy/beam'`` or ``'K'``.
+
+        Returns:
+            TBD
+        """
+        # Parse the functions.
+        unit = unit.lower().strip()
+        if 'k' in unit:
+            _unit = 'K'
+        elif 'beam' in unit:
+            _unit = 'Jy/beam'
+        else:
+            _unit = 'Jy'
+        _integrate = 'm/s' in unit
+
+        # Grab the spectra.
+        out = self.radial_spectra(rvals=rvals, rbins=rbins, x0=x0, y0=y0,
+                                  inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
+                                  phi=phi, z_func=z_func, mstar=mstar,
+                                  dist=dist, resample=resample,
+                                  beam_spacing=beam_spacing, PA_min=PA_min,
+                                  PA_max=PA_max, exclude_PA=exclude_PA,
+                                  assume_correlated=assume_correlated,
+                                  unit=_unit)
+        rvals, spectra = out
+
+        # Collapse the spectra to a radial profile.
+        if _integrate:
+            profile = np.array([np.trapz(s[1], s[0]) for s in spectra])
+        else:
+            profile = np.nanmax(spectra[:, 1], axis=-1)
+        assert profile.size == rvals.size, "Mismatch in x and y values."
+
+        # Basic approximation of uncertainty.
+        if _integrate:
+            sigma = np.mean(np.diff(spectra[:, 0], axis=-1), axis=-1)
+            sigma = np.sum(spectra[:, 2]**2 * sigma[:, None]**2, axis=-1)**0.5
+        else:
+            sigma = np.argmax(spectra[:, 1], axis=-1)
+            sigma = np.array([f[i] for f, i in zip(spectra[:, 2], sigma)])
+        return rvals, profile, sigma
 
     def find_center(self, dx=None, dy=None, Nx=None, Ny=None, mask=None,
                     v_min=None, v_max=None, spectrum='avg', SNR='peak',
@@ -542,7 +749,10 @@ class imagecube:
         if rbins is not None and rvals is not None:
             raise ValueError("Specify only 'rbins' or 'rvals', not both.")
         if rvals is not None:
-            dr = np.diff(rvals)[0] * 0.5
+            try:
+                dr = np.diff(rvals)[0] * 0.5
+            except IndexError:
+                dr = spacing * self.bmaj * 0.5
             rbins = np.linspace(rvals[0] - dr, rvals[-1] + dr, len(rvals) + 1)
         if rbins is not None:
             rvals = np.average([rbins[1:], rbins[:-1]], axis=0)
@@ -666,6 +876,32 @@ class imagecube:
             r_tmp = np.hypot(y_tmp, x_mid)
             t_tmp = np.arctan2(y_tmp, x_mid)
         return r_tmp, t_tmp, z_func(r_tmp)
+
+    # -- Spectral Axis Manipulation -- #
+
+    def velocity_to_restframe_frequency(self, velax=None, vlsr=0.0):
+        """Return restframe frequency [Hz] of the given velocity [m/s]."""
+        velax = self.velax if velax is None else np.squeeze(velax)
+        return self.nu * (1. - (velax - vlsr) / 2.998e8)
+
+    def restframe_frequency_to_velocity(self, nu, vlsr=0.0):
+        """Return velocity [m/s] of the given restframe frequency [Hz]."""
+        return 2.998e8 * (1. - nu / self.nu) + vlsr
+
+    def spectral_resolution(self, dV=None):
+        """Convert velocity resolution in [m/s] to [Hz]."""
+        dV = dV if dV is not None else self.chan
+        nu = self.velocity_to_restframe_frequency(velax=[-dV, 0.0, dV])
+        return np.mean([abs(nu[1] - nu[0]), abs(nu[2] - nu[1])])
+
+    def velocity_resolution(self, dnu):
+        """Convert spectral resolution in [Hz] to [m/s]."""
+        v0 = self.restframe_frequency_to_velocity(self.nu)
+        v1 = self.restframe_frequency_to_velocity(self.nu + dnu)
+        vA = max(v0, v1) - min(v0, v1)
+        v1 = self.restframe_frequency_to_velocity(self.nu - dnu)
+        vB = max(v0, v1) - min(v0, v1)
+        return np.mean([vA, vB])
 
     # -- FITS I/O -- #
 
@@ -795,11 +1031,39 @@ class imagecube:
             return self._readspectralaxis(a)
         return self._readrestfreq() * (1.0 - self._readvelocityaxis() / sc.c)
 
-    def _jybeam_to_Tb(self, data=None, nu=None):
+    # -- Unit Conversions -- #
+
+    def jybeam_to_Tb_RJ(self, data=None, nu=None):
+        """[Jy/beam] to [K] conversion using Rayleigh-Jeans approximation."""
         nu = self.nu if nu is None else nu
         data = self.data if data is None else data
         jy2k = 1e-26 * sc.c**2 / nu**2 / 2. / sc.k
         return jy2k * data / self._calculate_beam_area_str()
+
+    def jybeam_to_Tb(self, data=None, nu=None):
+        """[Jy/beam] to [K] conversion using the full Planck law."""
+        nu = self.nu if nu is None else nu
+        data = self.data if data is None else data
+        Tb = 1e-26 * abs(data) / self._calculate_beam_area_str()
+        Tb = 2.0 * sc.h * nu**3 / Tb / sc.c**2
+        Tb = sc.h * nu / sc.k / np.log(Tb + 1.0)
+        return np.where(data >= 0.0, Tb, -Tb)
+
+    def Tb_to_jybeam_RJ(self, data=None, nu=None):
+        """[K] to [Jy/beam] conversion using Rayleigh-Jeans approxmation."""
+        nu = self.nu if nu is None else nu
+        data = self.data if data is None else data
+        jy2k = 1e-26 * sc.c**2 / nu**2 / 2. / sc.k
+        return data * self._calculate_beam_area_str() / jy2k
+
+    def Tb_to_jybeam(self, data=None, nu=None):
+        """[K] to [Jy/beam] conversion using the full Planck law."""
+        nu = self.nu if nu is None else nu
+        data = self.data if data is None else data
+        Fnu = 2. * sc.h * nu**3 / sc.c**2
+        Fnu /= np.exp(sc.h * nu / sc.k / abs(data)) - 1.0
+        Fnu *= self._calculate_beam_area_str() / 1e-26
+        return np.where(data >= 0.0, Fnu, -Fnu)
 
     def _calculate_beam_area_arcsec(self):
         """Beam area in square arcseconds."""
@@ -880,3 +1144,4 @@ class imagecube:
                        color=kwargs.pop('color', kwargs.pop('c', 'k')),
                        zorder=kwargs.pop('zorder', 1000), **kwargs)
         ax.add_patch(beam)
+

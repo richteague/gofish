@@ -2,9 +2,9 @@ import setuptools
 
 setuptools.setup(
     name="gofish",
-    version="1.0.0",
+    version="1.0.1",
     author="Richard Teague",
-    author_email="rteague@umich.edu",
+    author_email="richard.d.teague@cfa.harvard.edu",
     description="Fishing for molecular line emission in protoplanetary disks.",
     url="https://github.com/richteague/gofish",
     packages=setuptools.find_packages(),
