@@ -4,4 +4,4 @@ API
 ===
 
 .. autoclass:: gofish.gofish.imagecube
-    :members: average_spectrum, integrated_spectrum, find_center, disk_coords
+    :members: average_spectrum, integrated_spectrum, radial_profile, radial_spectra, find_center, disk_coords
