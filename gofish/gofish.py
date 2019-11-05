@@ -375,14 +375,16 @@ class imagecube:
         ``unit`` argument:
 
             - ``'Jy m/s'``: Integrated spectrum in units of [Jy m/s].
-            - ``'K m/s'``: Inegrated spectrum in units of [K m/s] where the
-            conversion to [K] was calculated using the full Planck law.
+            - ``'K m/s'``: Inegrated spectrum in units of [K m/s].
             - ``'Jy'``: The peak of the integrated spectrum in [Jy].
-            - ``'K'``: The peak of the averaged spectrum in [K] where the
-            conversion to [k] was calculated using the full Planck law.
+            - ``'K'``: The peak of the averaged spectrum in [K].
             - ``'Jy/beam'`` - The peak of the averaged spectrum in [Jy/beam].
 
-        For other units, use the ``radial_spectra`` function.
+        All conversions from [Jy/beam] to [K] are performed using the full
+        Planck law which can give rise to significant errors in integrated
+        values. Furthermore, for all integrated values, the integration is
+        performed over the entire velocity range. For other units, or to
+        supply your own integration limits, use the ``radial_spectra``.
 
         Args:
             rvals (Optional[floats]): Array of bin centres for the profile in
@@ -434,7 +436,8 @@ class imagecube:
                 ``'Jy'``, ``'Jy/beam'`` or ``'K'``.
 
         Returns:
-            TBD
+            Arrays of the bin centers in [arcsec], the profile value in the
+            requested units and the associated uncertainties.
         """
         # Parse the functions.
         unit = unit.lower().strip()
