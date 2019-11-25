@@ -363,7 +363,6 @@ class imagecube:
                                  unit=unit)]
         return rvals, np.squeeze(spectra)
 
-
     def radial_profile(self, rvals=None, rbins=None, unit='Jy m/s', x0=0.0,
                        y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
                        phi=1.0, z_func=None, mstar=1.0, dist=100., resample=1,
@@ -476,6 +475,62 @@ class imagecube:
             sigma = np.array([f[i] for f, i in zip(spectra[:, 2], sigma)])
         return rvals, profile, sigma
 
+    def shifted_cube(self, inc, PA, mstar, dist, x0=0.0, y0=0.0, z0=0.0,
+                     psi=1.0, z1=0.0, phi=1.0, r_min=None, r_max=None,
+                     fill_val=np.nan,  save=False):
+        """
+        Apply the velocity shift to each pixel and return the cube, or save as
+        as new FITS file. This would be useful if you want to create moment
+        maps of the data where you want to integrate over a specific velocity
+        range without having to worry about the Keplerian rotation in the disk.
+
+        Args:
+            inc (float): Inclination of the disk in [degrees].
+            PA (float): Position angle of the disk in [degrees],
+                measured east-of-north towards the redshifted major axis.
+            mstar (Optional[float]): Stellar mass in [Msun].
+            dist (Optional[float]): Distance to the source in [pc].
+            z0 (Optional[float]): Emission height in [arcsec] at a radius of
+                1".
+            psi (Optional[float]): Flaring angle of the emission surface.
+            z1 (Optional[float]): Correction to emission height at 1" in
+                [arcsec].
+            phi (Optional[float]): Flaring angle correction term.
+            r_min (Optional[float]): The inner radius in [arcsec] to shift.
+            r_max (Optional[float]): The outer radius in [arcsec] to shift.
+
+        Returns:
+            The shifted data cube.
+        """
+
+        if save:
+            raise NotImplementedError("Coming soon!")
+
+        # Radial positions.
+        rvals, tvals, _ = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA,
+                                           z0=z0, psi=psi, z1=z1, phi=phi)
+        r_min = 0.0 if r_min is None else r_min
+        r_max = rvals.max() if r_max is None else r_max
+        mask = np.logical_and(rvals >= r_min, rvals <= r_max)
+
+        # Projected velocity.
+        vkep = self._keplerian(rvals=rvals, mstar=mstar, dist=dist, inc=inc,
+                               z0=z0, psi=psi, z1=z1, phi=phi)
+        vkep *= np.cos(tvals)
+        assert vkep.shape == mask.shape, "Velocity map incorrect shape."
+
+        # Shift each pixel.
+        from scipy.interpolate import interp1d
+        shifted = np.empty(self.data.shape)
+        for y in range(self.nypix):
+            for x in range(self.nxpix):
+                if mask[y, x]:
+                    shifted[:, y, x] = interp1d(self.velax - vkep[y, x],
+                                                self.data[:, y, x],
+                                                bounds_error=False)(self.velax)
+        assert shifted.shape == self.data.shape, "Wrong shape of shifted cube."
+        return shifted
+
     def find_center(self, dx=None, dy=None, Nx=None, Ny=None, mask=None,
                     v_min=None, v_max=None, spectrum='avg', SNR='peak',
                     normalize=True, **kwargs):
@@ -506,7 +561,7 @@ class imagecube:
                 Either ``'int'`` to use the integrated flux density as the
                 signal, or ``'peak'`` to use the maximum value.
             normalize (Optional[bool]): Whether to normalize the SNR map
-                relative to the SNR at ``(x0, y0) =  (0, 0)``.
+                relative to the SNR at ``(x0, y0) = (0, 0)``.
 
         Returns:
             The axes of the grid search, ``x0s`` and ``y0s``, as well as the
