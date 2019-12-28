@@ -30,8 +30,8 @@ class imagecube:
                          y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
                          phi=1.0, z_func=None, mstar=1.0, dist=100.,
                          resample=1, beam_spacing=False, PA_min=None,
-                         PA_max=None, exclude_PA=False, unit='Jy/beam',
-                         assume_correlated=True):
+                         PA_max=None, exclude_PA=False, mask_frame='disk',
+                         unit='Jy/beam', assume_correlated=True):
         """
         Return the averaged spectrum over a given radial range, returning a
         spectrum in units of [Jy/beam] or [K] using the Rayleigh-Jeans
@@ -95,6 +95,8 @@ class imagecube:
                 the sky-plane.
             exclude_PA (Optional[bool]): Whether to exclude pixels where
                 ``PA_min <= PA_pix <= PA_max``.
+            mask_frame (Optional[str]): Which frame the radial and azimuthal
+                mask is specified in, either ``'disk'`` or ``'sky'``.
             unit (Optional[str]): Units for the spectrum, either ``'Jy/beam'``
                 or ``'K'``. Note that the conversion to Kelvin assumes the
                 Rayleigh-Jeans approximation which is typically invalid at
@@ -177,7 +179,7 @@ class imagecube:
                             y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
                             phi=1.0, z_func=None, mstar=1.0, dist=100.,
                             resample=1, beam_spacing=False, PA_min=None,
-                            PA_max=None, exclude_PA=False,
+                            PA_max=None, exclude_PA=False, mask_frame='disk',
                             assume_correlated=False):
         """
         Return the integrated spectrum over a given radial range, returning a
@@ -241,6 +243,8 @@ class imagecube:
                 the sky-plane.
             exclude_PA (Optional[bool]): Whether to exclude pixels where
                 ``PA_min <= PA_pix <= PA_max``.
+            mask_frame (Optional[str]): Which frame the radial and azimuthal
+                mask is specified in, either ``'disk'`` or ``'sky'``.
             assume_correlated (Optional[bool]): Whether to treat the spectra
                 which are stacked as correlated, by default this is
                 ``True``. If ``False``, the uncertainty will be estimated using
@@ -261,6 +265,7 @@ class imagecube:
                                          beam_spacing=beam_spacing,
                                          PA_min=PA_min, PA_max=PA_max,
                                          exclude_PA=exclude_PA,
+                                         mask_frame=mask_frame,
                                          assume_correlated=assume_correlated)
         nbeams = np.pi * (r_max**2 - r_min**2)
         nbeams /= self._calculate_beam_area_arcsec()
@@ -270,7 +275,7 @@ class imagecube:
                        PA=0.0, z0=0.0, psi=1.0, z1=0.0, phi=1.0, z_func=None,
                        mstar=1.0, dist=100., resample=1, beam_spacing=False,
                        PA_min=None, PA_max=None, exclude_PA=None,
-                       assume_correlated=True, unit='Jy'):
+                       mask_frame='disk', assume_correlated=True, unit='Jy'):
         """
         Return shifted and stacked spectra, either integrated flux or average
         spectrum, along the provided radial profile.
@@ -314,6 +319,8 @@ class imagecube:
                 the sky-plane.
             exclude_PA (Optional[bool]): Whether to exclude pixels where
                 ``PA_min <= PA_pix <= PA_max``.
+            mask_frame (Optional[str]): Which frame the radial and azimuthal
+                mask is specified in, either ``'disk'`` or ``'sky'``.
             assume_correlated (Optional[bool]): Whether to treat the spectra
                 which are stacked as correlated, by default this is
                 ``True``. If ``False``, the uncertainty will be estimated using
@@ -352,6 +359,7 @@ class imagecube:
                                  dist=dist, resample=resample,
                                  beam_spacing=beam_spacing, PA_min=PA_min,
                                  PA_max=PA_max, exclude_PA=exclude_PA,
+                                 mask_frame=mask_frame,
                                  assume_correlated=assume_correlated)]
             else:
                 spectra += [func(r_min=r_min, r_max=r_max, x0=x0, y0=y0,
@@ -361,14 +369,15 @@ class imagecube:
                                  beam_spacing=beam_spacing, PA_min=PA_min,
                                  PA_max=PA_max, exclude_PA=exclude_PA,
                                  assume_correlated=assume_correlated,
-                                 unit=unit)]
+                                 mask_frame=mask_frame, unit=unit)]
         return rvals, np.squeeze(spectra)
 
     def radial_profile(self, rvals=None, rbins=None, unit='Jy m/s', x0=0.0,
                        y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
                        phi=1.0, z_func=None, mstar=1.0, dist=100., resample=1,
                        beam_spacing=False, PA_min=None, PA_max=None,
-                       exclude_PA=False, assume_correlated=True):
+                       exclude_PA=False, mask_frame='disk',
+                       assume_correlated=True):
         """
         Generate a radial profile from shifted and stacked spectra. There are
         different ways to collapse the spectrum into a single value using the
@@ -427,6 +436,8 @@ class imagecube:
                 the sky-plane.
             exclude_PA (Optional[bool]): Whether to exclude pixels where
                 ``PA_min <= PA_pix <= PA_max``.
+            mask_frame (Optional[str]): Which frame the radial and azimuthal
+                mask is specified in, either ``'disk'`` or ``'sky'``.
             assume_correlated (Optional[bool]): Whether to treat the spectra
                 which are stacked as correlated, by default this is
                 ``True``. If ``False``, the uncertainty will be estimated using
@@ -456,6 +467,7 @@ class imagecube:
                                   dist=dist, resample=resample,
                                   beam_spacing=beam_spacing, PA_min=PA_min,
                                   PA_max=PA_max, exclude_PA=exclude_PA,
+                                  mask_frame=mask_frame,
                                   assume_correlated=assume_correlated,
                                   unit=_unit)
         rvals, spectra = out
