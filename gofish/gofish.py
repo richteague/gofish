@@ -3,6 +3,7 @@ import numpy as np
 from astropy.io import fits
 import scipy.constants as sc
 
+
 class imagecube:
     """
     Base class containing all the FITS data. Must be a 3D cube containing two
@@ -611,7 +612,7 @@ class imagecube:
                 try:
                     x, y, dy = spectrum_func(x0=x0, y0=y0, **kwargs)
                     SNR[j, i] = SNR_func(x, y, dy, mask)
-                except:
+                except ValueError:
                     SNR[j, i] = np.nan
 
         # Determine the optimum position.
@@ -663,9 +664,10 @@ class imagecube:
 
     def get_annulus(self, r_min, r_max, PA_min=None, PA_max=None,
                     exclude_PA=False, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
-                    psi=1.0, z1=0.0, phi=1.0, z_func=None, beam_spacing=True,
-                    return_theta=True, as_annulus=True, suppress_warnings=True,
-                    remove_empty=True, sort_spectra=True, **kwargs):
+                    psi=1.0, z1=0.0, phi=1.0, z_func=None, mask=None,
+                    mask_frame='disk', beam_spacing=True, return_theta=True,
+                    as_annulus=True, suppress_warnings=True, remove_empty=True,
+                    sort_spectra=True, **kwargs):
         """
         Return an annulus (or section of), of spectra and their polar angles.
         Can select spatially independent pixels within the annulus, however as
@@ -698,6 +700,11 @@ class imagecube:
             z_func (Optional[function]): A function which provides z(r). Note
                 that no checking will occur to make sure this is a valid
                 function.
+            mask (Optional[ndarray]): A 2D array mask which matches the shape
+                of the data.
+            mask_frame (Optional[str]): Coordinate frame for the mask. Either
+                ``'disk'`` or ``'sky'``. If ``disk`` coordinates are used then
+                the inclination and position angle of the mask are set to zero.
             beam_spacing (Optional[bool/float]): If True, randomly sample the
                 annulus such that each pixel is at least a beam FWHM apart. A
                 number can also be used in place of a boolean which will
@@ -712,37 +719,33 @@ class imagecube:
             increasing polar angle.
         """
 
-        # Flatten the data.
-
-        dvals = self.data.copy()
-        dvals = dvals.reshape(self.data.shape[0], -1)
-
-        # Apply the mask.
-
-        mask = self._get_mask(r_min=r_min, r_max=r_max, exclude_r=False,
-                              PA_min=PA_min, PA_max=PA_max,
-                              exclude_PA=exclude_PA, x0=x0, y0=y0, inc=inc,
-                              PA=PA, z0=z0, psi=psi, z1=z1, phi=phi,
-                              z_func=z_func)
+        # Generate the mask and check it is the correct shape.
+        if mask is not None:
+            mask = self.get_mask(r_min=r_min, r_max=r_max, exclude_r=False,
+                                 PA_min=PA_min, PA_max=PA_max,
+                                 exclude_PA=exclude_PA, x0=x0, y0=y0, inc=inc,
+                                 PA=PA, z0=z0, psi=psi, z1=z1, phi=phi,
+                                 z_func=z_func, mask_frame=mask_frame)
+        if mask.shape != self.data.shape[0]:
+            raise ValueError("`mask` is incorrect shape.")
         mask = mask.flatten()
 
-        rvals, tvals, _ = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
-                                           psi=psi, z1=z1, phi=phi,
-                                           z_func=z_func)
+        # Flatten the data and get deprojected pixel coordinates.
+        dvals = self.data.copy().reshape(self.data.shape[0], -1)
+        rvals, tvals = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
+                                        psi=psi, z1=z1, phi=phi,
+                                        z_func=z_func)[:2]
         rvals, tvals = rvals.flatten(), tvals.flatten()
         dvals, rvals, tvals = dvals[:, mask].T, rvals[mask], tvals[mask]
 
         # Apply the beam sampling.
-
         if beam_spacing:
 
             # Order the data in increase position angle.
-
             idxs = np.argsort(tvals)
             dvals, tvals = dvals[idxs], tvals[idxs]
 
             # Calculate the sampling rate.
-
             sampling = float(beam_spacing) * self.bmaj
             sampling /= np.mean(rvals) * np.median(np.diff(tvals))
             sampling = np.floor(sampling).astype('int')
@@ -750,7 +753,6 @@ class imagecube:
             # If the sampling rate is above 1, start at a random location in
             # the array and sample at this rate, otherwise don't sample. This
             # happens at small radii, for example.
-
             if sampling > 1:
                 start = np.random.randint(0, tvals.size)
                 tvals = np.concatenate([tvals[start:], tvals[:start]])
@@ -758,7 +760,6 @@ class imagecube:
                 tvals, dvals = tvals[::sampling], dvals[::sampling]
 
         # Return the values in the requested form.
-
         if as_annulus:
             from eddy.fit_annulus import annulus
             return annulus(spectra=dvals, theta=tvals, velax=self.velax,
@@ -767,25 +768,59 @@ class imagecube:
                            sort_spectra=sort_spectra)
         return dvals, tvals
 
-    def _get_mask(self, r_min=None, r_max=None, exclude_r=False, PA_min=None,
-                  PA_max=None, exclude_PA=False, x0=0.0, y0=0.0, inc=0.0,
-                  PA=0.0, z0=0.0, psi=1.0, z1=0.0, phi=1.0, z_func=None):
-        """Returns a 2D mask for pixels in the given region."""
-        rvals, tvals, _ = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
-                                           psi=psi, z1=z1, phi=phi,
-                                           z_func=z_func, frame='cylindrical')
+    def get_mask(self, r_min=None, r_max=None, exclude_r=False, PA_min=None,
+                 PA_max=None, exclude_PA=False, mask_frame='disk', x0=0.0,
+                 y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0, phi=1.0,
+                 z_func=None):
+        """
+        Returns a 2D mask for pixels in the given region. The mask can be
+        specified in either disk-centric coordinates, ``mask_frame='disk'``,
+        or on the sky, ``mask_frame='sky'``. If sky-frame coordinates are
+        requested, the geometrical parameters (``inc``, ``PA``, ``z0``, etc.)
+        are ignored, however the source offsets, ``x0``, ``y0``, are still
+        considered.
+
+        Args:
+            TBD
+
+        Returns:
+            A 2D array mask matching the shape of a channel.
+        """
+
+        # Check the requested frame.
+        mask_frame = mask_frame.lower()
+        if mask_frame not in ['disk', 'sky']:
+            raise ValueError("mask_frame must be 'disk' or 'sky'.")
+
+        # Remove coordinates if in sky-frame.
+        if mask_frame == 'sky':
+            inc, PA = 0.0, 0.0
+            z0, psi = 0.0, 1.0
+            z1, phi = 0.0, 1.0
+            z_func = None
+
+        # Calculate pixel coordaintes.
+        rvals, tvals = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
+                                        psi=psi, z1=z1, phi=phi, z_func=z_func,
+                                        frame='cylindrical')[:2]
+
+        # Radial mask.
         r_min = np.nanmin(rvals) if r_min is None else r_min
         r_max = np.nanmax(rvals) if r_max is None else r_max
         if r_min >= r_max:
             raise ValueError("`r_min` must be smaller than `r_max`.")
         r_mask = np.logical_and(rvals >= r_min, rvals <= r_max)
         r_mask = ~r_mask if exclude_r else r_mask
+
+        # Azimuthal mask.
         PA_min = np.nanmin(tvals) if PA_min is None else np.radians(PA_min)
         PA_max = np.nanmax(tvals) if PA_max is None else np.radians(PA_max)
         if PA_min >= PA_max:
             raise ValueError("`PA_min` must be smaller than `PA_max`.")
         PA_mask = np.logical_and(tvals >= PA_min, tvals <= PA_max)
         PA_mask = ~PA_mask if exclude_PA else PA_mask
+
+        # Combine and return.
         return r_mask * PA_mask
 
     def radial_sampling(self, rbins=None, rvals=None, spacing=0.25):
@@ -1015,7 +1050,7 @@ class imagecube:
             self.beamarea = self.dpix**2.0
 
     def _clip_cube(self, radius):
-        """Clip the cube to +\- clip arcseconds from the origin."""
+        """Clip the cube plus or minus clip arcseconds from the origin."""
         xa = abs(self.xaxis - radius).argmin()
         if self.xaxis[xa] < radius:
             xa -= 1
@@ -1202,4 +1237,3 @@ class imagecube:
                        color=kwargs.pop('color', kwargs.pop('c', 'k')),
                        zorder=kwargs.pop('zorder', 1000), **kwargs)
         ax.add_patch(beam)
-
