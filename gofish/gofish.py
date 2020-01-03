@@ -738,7 +738,7 @@ class imagecube:
                                  exclude_PA=exclude_PA, x0=x0, y0=y0, inc=inc,
                                  PA=PA, z0=z0, psi=psi, z1=z1, phi=phi,
                                  z_func=z_func, mask_frame=mask_frame)
-        if mask.shape != self.data.shape[0]:
+        if mask.shape != self.data[0].shape:
             raise ValueError("`mask` is incorrect shape.")
         mask = mask.flatten()
 
@@ -1060,6 +1060,10 @@ class imagecube:
             self.bmin = self.dpix
             self.bpa = 0.0
             self.beamarea = self.dpix**2.0
+
+    @property
+    def beam(self):
+        return self.bmaj, self.bmin, self.bpa
 
     def _clip_cube(self, radius):
         """Clip the cube plus or minus clip arcseconds from the origin."""
