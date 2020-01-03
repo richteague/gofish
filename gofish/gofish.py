@@ -732,7 +732,7 @@ class imagecube:
         """
 
         # Generate the mask and check it is the correct shape.
-        if mask is not None:
+        if mask is None:
             mask = self.get_mask(r_min=r_min, r_max=r_max, exclude_r=False,
                                  PA_min=PA_min, PA_max=PA_max,
                                  exclude_PA=exclude_PA, x0=x0, y0=y0, inc=inc,
