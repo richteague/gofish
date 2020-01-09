@@ -17,6 +17,9 @@ class imagecube:
             [arcsec].
     """
 
+    frequency_units = {'GHz': 1e9, 'MHz': 1e6, 'kHz': 1e3, 'Hz': 1e0}
+    velocity_units = {'km/s': 1e3, 'm/s': 1e0}
+
     def __init__(self, path, clip=None):
         self._read_FITS(path)
         if clip is not None:
@@ -987,11 +990,11 @@ class imagecube:
     def velocity_to_restframe_frequency(self, velax=None, vlsr=0.0):
         """Return restframe frequency [Hz] of the given velocity [m/s]."""
         velax = self.velax if velax is None else np.squeeze(velax)
-        return self.nu * (1. - (velax - vlsr) / 2.998e8)
+        return self.nu0 * (1. - (velax - vlsr) / 2.998e8)
 
     def restframe_frequency_to_velocity(self, nu, vlsr=0.0):
         """Return velocity [m/s] of the given restframe frequency [Hz]."""
-        return 2.998e8 * (1. - nu / self.nu) + vlsr
+        return 2.998e8 * (1. - nu / self.nu0) + vlsr
 
     def spectral_resolution(self, dV=None):
         """Convert velocity resolution in [m/s] to [Hz]."""
@@ -1001,10 +1004,10 @@ class imagecube:
 
     def velocity_resolution(self, dnu):
         """Convert spectral resolution in [Hz] to [m/s]."""
-        v0 = self.restframe_frequency_to_velocity(self.nu)
-        v1 = self.restframe_frequency_to_velocity(self.nu + dnu)
+        v0 = self.restframe_frequency_to_velocity(self.nu0)
+        v1 = self.restframe_frequency_to_velocity(self.nu0 + dnu)
         vA = max(v0, v1) - min(v0, v1)
-        v1 = self.restframe_frequency_to_velocity(self.nu - dnu)
+        v1 = self.restframe_frequency_to_velocity(self.nu0 - dnu)
         vB = max(v0, v1) - min(v0, v1)
         return np.mean([vA, vB])
 
@@ -1030,7 +1033,7 @@ class imagecube:
         self.dpix = np.mean([abs(np.diff(self.xaxis))])
 
         # Spectral axis.
-        self.nu = self._readrestfreq()
+        self.nu0 = self._readrestfreq()
         self.velax = self._readvelocityaxis()
         self.chan = np.mean(np.diff(self.velax))
         self.freqax = self._readfrequencyaxis()
@@ -1040,7 +1043,7 @@ class imagecube:
             self.freqax = self.freqax[::-1]
             self.chan *= -1.0
 
-        # Extras.
+        # Beam.
         self._read_beam()
 
     def _read_beam(self):
@@ -1127,8 +1130,8 @@ class imagecube:
         a = 4 if 'stokes' in self.header['ctype3'].lower() else 3
         if 'freq' in self.header['ctype%d' % a].lower():
             specax = self._readspectralaxis(a)
-            velax = (self.nu - specax) * sc.c
-            velax /= self.nu
+            velax = (self.nu0 - specax) * sc.c
+            velax /= self.nu0
         else:
             velax = self._readspectralaxis(a)
         return velax
@@ -1140,18 +1143,47 @@ class imagecube:
             return self._readspectralaxis(a)
         return self._readrestfreq() * (1.0 - self._readvelocityaxis() / sc.c)
 
+    def frequency(self, vlsr=0.0, unit='GHz'):
+        """
+        A `velocity_to_restframe_frequency` wrapper with unit conversion.
+
+        Args:
+            vlsr (optional[float]): Sytemic velocity in [m/s].
+            unit (optional[str]): Unit for the output axis.
+
+        Returns:
+            1D array of frequency values.
+        """
+        return self.frequency_offset(nu0=0.0, vlsr=vlsr, unit=unit)
+
+    def frequency_offset(self, nu0=None, vlsr=0.0, unit='MHz'):
+        """
+        Return the frequency offset relative to `nu0` for easier plotting.
+
+        Args:
+            nu0 (optional[float]): Reference restframe frequency in [Hz].
+            vlsr (optional[float]): Sytemic velocity in [m/s].
+            unit (optional[str]): Unit for the output axis.
+
+        Returns:
+            1D array of frequency values.
+        """
+        nu0 = self.nu0 if nu0 is None else nu0
+        nu = self.velocity_to_restframe_frequency(vlsr=vlsr)
+        return (nu - nu0) / imagecube.frequency_units[unit]
+
     # -- Unit Conversions -- #
 
     def jybeam_to_Tb_RJ(self, data=None, nu=None):
         """[Jy/beam] to [K] conversion using Rayleigh-Jeans approximation."""
-        nu = self.nu if nu is None else nu
+        nu = self.nu0 if nu is None else nu
         data = self.data if data is None else data
         jy2k = 1e-26 * sc.c**2 / nu**2 / 2. / sc.k
         return jy2k * data / self._calculate_beam_area_str()
 
     def jybeam_to_Tb(self, data=None, nu=None):
         """[Jy/beam] to [K] conversion using the full Planck law."""
-        nu = self.nu if nu is None else nu
+        nu = self.nu0 if nu is None else nu
         data = self.data if data is None else data
         Tb = 1e-26 * abs(data) / self._calculate_beam_area_str()
         Tb = 2.0 * sc.h * nu**3 / Tb / sc.c**2
@@ -1160,14 +1192,14 @@ class imagecube:
 
     def Tb_to_jybeam_RJ(self, data=None, nu=None):
         """[K] to [Jy/beam] conversion using Rayleigh-Jeans approxmation."""
-        nu = self.nu if nu is None else nu
+        nu = self.nu0 if nu is None else nu
         data = self.data if data is None else data
         jy2k = 1e-26 * sc.c**2 / nu**2 / 2. / sc.k
         return data * self._calculate_beam_area_str() / jy2k
 
     def Tb_to_jybeam(self, data=None, nu=None):
         """[K] to [Jy/beam] conversion using the full Planck law."""
-        nu = self.nu if nu is None else nu
+        nu = self.nu0 if nu is None else nu
         data = self.data if data is None else data
         Fnu = 2. * sc.h * nu**3 / sc.c**2
         Fnu /= np.exp(sc.h * nu / sc.k / abs(data)) - 1.0
@@ -1196,7 +1228,7 @@ class imagecube:
 
     # -- Plotting Functions -- #
 
-    def _plot_center(self, x0s, y0s, SNR, normalize=True):
+    def plot_center(self, x0s, y0s, SNR, normalize=True):
         """Plot the array of SNR values."""
         import matplotlib.pyplot as plt
 
@@ -1235,7 +1267,7 @@ class imagecube:
         ax.set_ylabel('Offset (arcsec)')
         self._plot_beam(ax=ax)
 
-    def _plot_beam(self, ax, x0=0.1, y0=0.1, **kwargs):
+    def plot_beam(self, ax, x0=0.1, y0=0.1, **kwargs):
         """
         Plot the sythensized beam on the provided axes.
 
