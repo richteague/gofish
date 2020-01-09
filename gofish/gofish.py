@@ -7,8 +7,9 @@ import scipy.constants as sc
 class imagecube:
     """
     Base class containing all the FITS data. Must be a 3D cube containing two
-    spatial and one velocity axis. These can easily be made from CASA using the
-    ``exportfits()`` command.
+    spatial and one velocity axis for and spectral shifting. A 2D 'cube' can
+    be used to make the most of the deprojection routines. These can easily be
+    made from CASA using the ``exportfits()`` command.
 
     Args:
         path (str): Relative path to the FITS cube.
@@ -141,7 +142,7 @@ class imagecube:
         unit = unit.lower()
         if unit not in ['jy/beam', 'k']:
             raise ValueError("Unknown `unit`.")
-        if resample < 1.0:
+        if resample < 1.0 and self.verbose:
             print('WARNING: `resample < 1`, are you sure you want channels '
                   + 'more narrow than 1 m/s?')
 
@@ -493,7 +494,8 @@ class imagecube:
             profile = np.array([np.trapz(s[1], s[0]) for s in spectra])
         else:
             profile = np.nanmax(spectra[:, 1], axis=-1)
-        assert profile.size == rvals.size, "Mismatch in x and y values."
+        if profile.size != rvals.size:
+            raise ValueError("Mismatch in x and y values.")
 
         # Basic approximation of uncertainty.
         if _integrate:
@@ -606,7 +608,8 @@ class imagecube:
         vkep = self._keplerian(rvals=rvals, mstar=mstar, dist=dist, inc=inc,
                                z0=z0, psi=psi, z1=z1, phi=phi)
         vkep *= np.cos(tvals)
-        assert vkep.shape == mask.shape, "Velocity map incorrect shape."
+        if vkep.shape != mask.shape:
+            raise ValueError("Velocity map incorrect shape.")
 
         # Shift each pixel.
         from scipy.interpolate import interp1d
