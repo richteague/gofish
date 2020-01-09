@@ -15,17 +15,19 @@ class imagecube:
         clip (Optional[float]): Clip the image cube down to a specific
             field-of-view spanning a range ``(2 * clip)``, where ``clip`` is in
             [arcsec].
+        verbose (Optional[bool]): Whether to print out warning messages.
     """
 
     frequency_units = {'GHz': 1e9, 'MHz': 1e6, 'kHz': 1e3, 'Hz': 1e0}
     velocity_units = {'km/s': 1e3, 'm/s': 1e0}
 
-    def __init__(self, path, clip=None):
+    def __init__(self, path, clip=None, verbose=True):
         self._read_FITS(path)
+        self.verbose = verbose
         if clip is not None:
             self._clip_cube(clip)
-        if self.data.ndim != 3:
-            raise ValueError("Provided cube must be three dimensional (PPV).")
+        if self.data.ndim != 3 and self.verbose:
+            print("WARNING: Provided cube is only 2D. Shifting not available.")
 
     # -- Fishing Functions -- #
 
@@ -453,6 +455,17 @@ class imagecube:
             Arrays of the bin centers in [arcsec], the profile value in the
             requested units and the associated uncertainties.
         """
+        # If shifting not available, change function.
+        if self.data.ndim == 2:
+            return self._radial_profile_2D(rvals=rvals, rbins=rbins, x0=x0,
+                                           y0=y0, inc=inc, PA=PA, z0=z0,
+                                           psi=psi, z1=z1, phi=phi,
+                                           z_func=z_func, PA_min=PA_min,
+                                           PA_max=PA_max,
+                                           exclude_PA=exclude_PA,
+                                           mask_frame=mask_frame,
+                                           assume_correlated=assume_correlated)
+
         # Parse the functions.
         unit = unit.lower().strip()
         if 'k' in unit:
@@ -490,6 +503,66 @@ class imagecube:
             sigma = np.argmax(spectra[:, 1], axis=-1)
             sigma = np.array([f[i] for f, i in zip(spectra[:, 2], sigma)])
         return rvals, profile, sigma
+
+    def _radial_profile_2D(self, rvals=None, rbins=None, x0=0.0, y0=0.0,
+                           inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0, phi=1.0,
+                           z_func=None, PA_min=None, PA_max=None,
+                           exclude_PA=False, mask_frame='disk',
+                           assume_correlated=False, percentiles=False):
+        """
+        Returns the radial profile if `self.data.ndim == 2`, i.e., if shifting
+        cannot be performed. Uses all the same parameters, but does not do any
+        of the shifting and ignores the units. If this is called directly then
+        there are several specific options.
+
+        Args:
+            percentiles (Optional[bool]): Use the 16th to 84th percentil of the
+                bin distribution to estimate uncertainties rather than the
+                standard deviation.
+
+        Returns:
+            Three 1D arrays with ``x``, ``y`` and ``dy`` for plotting.
+        """
+
+        # Warning message.
+        if self.verbose:
+            print("Attached data is not 3D, so shifting cannot be applied. " +
+                  "\nReverting to standard azimuthal averaging; " +
+                  "will ignore 'units' argument.")
+
+        # Calculate the mask.
+        rbins, rvals = self.radial_sampling(rbins=rbins, rvals=rvals)
+        mask = self.get_mask(r_min=rbins[0], r_max=rbins[-1], PA_min=PA_min,
+                             PA_max=PA_max, exclude_PA=exclude_PA,
+                             mask_frame=mask_frame, x0=x0, y0=y0, inc=inc,
+                             PA=PA, z0=z0, psi=psi, z1=z1, phi=phi,
+                             z_func=z_func)
+        if mask.shape != self.data.shape:
+            raise ValueError("Mismatch in mask and data shape.")
+        mask = mask.flatten()
+
+        # Deprojection of the disk coordinates.
+        rpnts = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA, z0=z0, psi=psi,
+                                 z1=z1, phi=phi, z_func=z_func)[0]
+        if rpnts.shape != self.data.shape:
+            raise ValueError("Mismatch in rvals and data shape.")
+        rpnts = rpnts.flatten()
+
+        # Radial binning.
+        rpnts = rpnts[mask]
+        toavg = self.data.flatten()[mask]
+        ridxs = np.digitize(rpnts, rbins)
+        if percentiles:
+            rstat = np.array([np.percentile(toavg[ridxs == r], [16, 50, 84])
+                              for r in range(1, rbins.size)]).T
+            ravgs = rstat[1]
+            rstds = np.array([rstat[1] - rstat[0], rstat[2] - rstat[1]])
+        else:
+            ravgs = np.array([np.mean(toavg[ridxs == r])
+                              for r in range(1, rbins.size)])
+            rstds = np.array([np.std(toavg[ridxs == r])
+                              for r in range(1, rbins.size)])
+        return rvals, ravgs, rstds
 
     def shifted_cube(self, inc, PA, mstar, dist, x0=0.0, y0=0.0, z0=0.0,
                      psi=1.0, z1=0.0, phi=1.0, r_min=None, r_max=None,
@@ -796,7 +869,34 @@ class imagecube:
         considered.
 
         Args:
-            TBD
+            r_min (float): Minimum midplane radius of the annulus in [arcsec].
+            r_max (float): Maximum midplane radius of the annulus in [arcsec].
+            exclude_r (Optional[bool]): If True, exclude the provided radial
+                range rather than include.
+            PA_min (Optional[float]): Minimum polar angle of the segment of the
+                annulus in [degrees]. Note this is the polar angle, not the
+                position angle.
+            PA_max (Optional[float]): Maximum polar angle of the segment of the
+                annulus in [degrees]. Note this is the polar angle, not the
+                position angle.
+            exclude_PA (Optional[bool]): If True, exclude the provided polar
+                angle range rather than include.
+            x0 (Optional[float]): Source center offset along the x-axis in
+                [arcsec].
+            y0 (Optional[float]): Source center offset along the y-axis in
+                [arcsec].
+            inc (Optional[float]): Inclination of the disk in [degrees].
+            PA (Optional[float]): Position angle of the disk in [degrees],
+                measured east-of-north towards the redshifted major axis.
+            z0 (Optional[float]): Emission height in [arcsec] at a radius of
+                1".
+            psi (Optional[float]): Flaring angle of the emission surface.
+            z1 (Optional[float]): Correction to emission height at 1" in
+                [arcsec].
+            phi (Optional[float]): Flaring angle correction term.
+            z_func (Optional[function]): A function which provides
+                :math:`z(r)`. Note that no checking will occur to make sure
+                this is a valid function.
 
         Returns:
             A 2D array mask matching the shape of a channel.
@@ -1035,7 +1135,10 @@ class imagecube:
         # Spectral axis.
         self.nu0 = self._readrestfreq()
         self.velax = self._readvelocityaxis()
-        self.chan = np.mean(np.diff(self.velax))
+        if self.velax.size > 1:
+            self.chan = np.mean(np.diff(self.velax))
+        else:
+            self.chan = np.nan
         self.freqax = self._readfrequencyaxis()
         if self.chan < 0.0:
             self.data = self.data[::-1]
