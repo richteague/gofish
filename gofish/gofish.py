@@ -37,7 +37,8 @@ class imagecube:
                          phi=1.0, z_func=None, mstar=1.0, dist=100.,
                          resample=1, beam_spacing=False, PA_min=None,
                          PA_max=None, exclude_PA=False, mask_frame='disk',
-                         unit='Jy/beam', assume_correlated=True):
+                         unit='Jy/beam', assume_correlated=True,
+                         skip_empty_annuli=True):
         """
         Return the averaged spectrum over a given radial range, returning a
         spectrum in units of [Jy/beam] or [K] using the Rayleigh-Jeans
@@ -112,6 +113,9 @@ class imagecube:
                 ``True``. If ``False``, the uncertainty will be estimated using
                 Poisson statistics, otherwise the uncertainty is just the
                 standard deviation of each velocity bin.
+            skip_empty_annuli (Optional[bool]): If ``True``, skip any annuli
+                which are empty (i.e. their masks have zero pixels in). If
+                ``False``, any empty masks will raise a ``ValueError``.
 
         Returns:
             The velocity axis of the spectrum, ``velax``, in [m/s], the
@@ -147,25 +151,39 @@ class imagecube:
                   + 'more narrow than 1 m/s?')
 
         # Get the deprojected spectrum for each annulus.
-        spectra, scatter = [], []
+        # Have an array to describe whether an annulus is included in the
+        # average or not.
+        spectra, scatter, included = [], [], np.ones(rvals.size).astype('int')
         for ridx in range(rvals.size):
-            annulus = self.get_annulus(rbins[ridx], rbins[ridx+1],
-                                       x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
-                                       psi=psi, z1=z1, phi=phi,
-                                       beam_spacing=beam_spacing,
-                                       PA_min=PA_min, PA_max=PA_max,
-                                       exclude_PA=exclude_PA, as_ensemble=True,
-                                       mask_frame=mask_frame)
-            x, y, dy = annulus.deprojected_spectrum(vrot=v_kep[ridx],
-                                                    resample=resample,
-                                                    scatter=True)
-            spectra += [y]
-            scatter += [dy]
+            try:
+                annulus = self.get_annulus(rbins[ridx], rbins[ridx+1],
+                                           x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
+                                           psi=psi, z1=z1, phi=phi,
+                                           beam_spacing=beam_spacing,
+                                           PA_min=PA_min, PA_max=PA_max,
+                                           exclude_PA=exclude_PA,
+                                           as_ensemble=True,
+                                           mask_frame=mask_frame)
+                x, y, dy = annulus.deprojected_spectrum(vrot=v_kep[ridx],
+                                                        resample=resample,
+                                                        scatter=True)
+                spectra += [y]
+                scatter += [dy]
+            except ValueError:
+                msg = "No pixels in the mask between "
+                msg += "{:.2f} ".format(rbins[ridx])
+                msg += "and {:.2f} arcsec.".format(rbins[ridx+1])
+                if not skip_empty_annuli:
+                    raise ValueError(msg)
+                else:
+                    included[ridx] = 0
+                    if self.verbose:
+                        print(msg + ' Skipping annulus.')
         spectra = np.where(np.isfinite(spectra), spectra, 0.0)
         scatter = np.where(np.isfinite(scatter), scatter, 0.0)
 
         # Weight the annulus based on its area.
-        weights = np.pi * (rbins[1:]**2 - rbins[:-1]**2)
+        weights = np.pi * (rbins[included][1:]**2 - rbins[included][:-1]**2)
         spectrum = np.average(spectra, axis=0, weights=weights)
 
         # Uncertainty propagation.
@@ -187,7 +205,7 @@ class imagecube:
                             phi=1.0, z_func=None, mstar=1.0, dist=100.,
                             resample=1, beam_spacing=False, PA_min=None,
                             PA_max=None, exclude_PA=False, mask_frame='disk',
-                            assume_correlated=False):
+                            assume_correlated=False, skip_empty_annuli=True):
         """
         Return the integrated spectrum over a given radial range, returning a
         spectrum in units of [Jy].
@@ -257,6 +275,9 @@ class imagecube:
                 ``True``. If ``False``, the uncertainty will be estimated using
                 Poisson statistics, otherwise the uncertainty is just the
                 standard deviation of each velocity bin.
+            skip_empty_annuli (Optional[bool]): If ``True``, skip any annuli
+                which are empty (i.e. their masks have zero pixels in). If
+                ``False``, any empty masks will raise a ``ValueError``.
 
         Returns:
             The velocity axis of the spectrum, ``velax``, in [m/s], the
@@ -273,7 +294,8 @@ class imagecube:
                                          PA_min=PA_min, PA_max=PA_max,
                                          exclude_PA=exclude_PA,
                                          mask_frame=mask_frame,
-                                         assume_correlated=assume_correlated)
+                                         assume_correlated=assume_correlated,
+                                         skip_empty_annuli=skip_empty_annuli)
         nbeams = np.pi * (r_max**2 - r_min**2)
         nbeams /= self._calculate_beam_area_arcsec()
         return x, y * nbeams, dy * nbeams
@@ -940,7 +962,10 @@ class imagecube:
         PA_mask = ~PA_mask if exclude_PA else PA_mask
 
         # Combine and return.
-        return r_mask * PA_mask
+        mask = r_mask * PA_mask
+        if np.sum(mask) == 0:
+            raise ValueError("There are zero pixels in the mask.")
+        return mask
 
     def radial_sampling(self, rbins=None, rvals=None, spacing=0.25):
         """
