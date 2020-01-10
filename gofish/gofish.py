@@ -178,12 +178,19 @@ class imagecube:
                 else:
                     included[ridx] = 0
                     if self.verbose:
-                        print(msg + ' Skipping annulus.')
+                        print("WARNING: " + msg + " Skipping annulus.")
+
+        # Remove any pesky NaNs.
         spectra = np.where(np.isfinite(spectra), spectra, 0.0)
         scatter = np.where(np.isfinite(scatter), scatter, 0.0)
 
         # Weight the annulus based on its area.
-        weights = np.pi * (rbins[included][1:]**2 - rbins[included][:-1]**2)
+        weights = np.pi * (rbins[1:]**2 - rbins[:-1]**2)
+        weights = weights[included.astype('bool')]
+        if weights.size != spectra.shape[0]:
+            raise ValueError("Number of weights, {:d}, ".format(weights.size)
+                             + "does not match number of spectra, "
+                             + "{:d}.".format(spectra.shape[0]))
         spectrum = np.average(spectra, axis=0, weights=weights)
 
         # Uncertainty propagation.
