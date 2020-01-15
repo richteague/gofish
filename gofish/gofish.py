@@ -422,12 +422,13 @@ class imagecube:
         # Check is cube is 2D.
         self._test_2D()
 
-        # Radial sampling.
+        # Radial sampling with radial boundaries.
         rbins, rvals = self.radial_sampling(rbins=rbins, rvals=rvals)
         r_min = rbins[0] if r_min is None else r_min
         r_max = rbins[-1] if r_max is None else r_max
-        rbins = rbins[np.argmax(rbins >= r_min):np.argmin(rbins <= r_max)]
-        rbins, rvals = self.radial_sampling(rbins=rbins, rvals=None)
+        idx_a = 0 if r_min <= rbins[0] else np.argmax(rbins >= r_min)
+        idx_b = rbins.size if r_max >= rbins[-1] else np.argmin(rbins <= r_max)
+        rbins, rvals = self.radial_sampling(rbins=rbins[idx_a:idx_b])
 
         # Cycle through and deproject the spectra.
         spectra = []
@@ -639,7 +640,7 @@ class imagecube:
         if self.verbose:
             print("Attached data is not 3D, so shifting cannot be applied. " +
                   "\nReverting to standard azimuthal averaging; " +
-                  "will ignore 'units' argument.")
+                  "will ignore `unit` argument.")
 
         # Calculate the mask.
         rbins, rvals = self.radial_sampling(rbins=rbins, rvals=rvals)
