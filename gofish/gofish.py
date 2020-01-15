@@ -32,13 +32,13 @@ class imagecube:
 
     # -- Fishing Functions -- #
 
-    def average_spectrum(self, r_min=None, r_max=None, dr_bin=None, PA_min=None,
-                         PA_max=None, exclude_PA=False, abs_PA=False, x0=0.0,
-                         y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
-                         phi=1.0, z_func=None, mstar=1.0, dist=100.,
-                         resample=1, beam_spacing=False, mask_frame='disk',
-                         unit='Jy/beam', assume_correlated=True,
-                         skip_empty_annuli=True):
+    def average_spectrum(self, r_min=None, r_max=None, dr_bin=None,
+                         PA_min=None, PA_max=None, exclude_PA=False,
+                         abs_PA=False, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
+                         psi=1.0, z1=0.0, phi=1.0, z_func=None, mstar=1.0,
+                         dist=100., resample=1, beam_spacing=False,
+                         mask_frame='disk', unit='Jy/beam',
+                         assume_correlated=True, skip_empty_annuli=True):
         """
         Return the averaged spectrum over a given radial range, returning a
         spectrum in units of [Jy/beam] or [K] using the Rayleigh-Jeans
@@ -323,9 +323,8 @@ class imagecube:
                              abs_PA=abs_PA, mask_frame=mask_frame, x0=x0,
                              y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
                              phi=phi, z_func=z_func)
-        nbeams = np.sum(mask is True) * self.dpix**2
-        nbeams /= self._calculate_beam_area_arcsec()
-        return x, y * nbeams, dy * nbeams
+        nb = np.sum(mask) * self.dpix**2 / self._calculate_beam_area_arcsec()
+        return x, y * nb, dy * nb
 
     def radial_spectra(self, rvals=None, rbins=None, x0=0.0, y0=0.0, inc=0.0,
                        PA=0.0, z0=0.0, psi=1.0, z1=0.0, phi=1.0, z_func=None,
@@ -1523,4 +1522,3 @@ class imagecube:
         ax.contourf(self.xaxis, self.yaxis, mask, [-.5, .5],
                     colors=contour_kwargs['colors'], alpha=mask_alpha)
         ax.contour(self.xaxis, self.yaxis, mask, 1, **contour_kwargs)
-        return ax
