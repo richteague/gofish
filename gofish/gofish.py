@@ -32,11 +32,11 @@ class imagecube:
 
     # -- Fishing Functions -- #
 
-    def average_spectrum(self, r_min=None, r_max=None, dr_bin=None, x0=0.0,
+    def average_spectrum(self, r_min=None, r_max=None, dr_bin=None, PA_min=None,
+                         PA_max=None, exclude_PA=False, abs_PA=False, x0=0.0,
                          y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
                          phi=1.0, z_func=None, mstar=1.0, dist=100.,
-                         resample=1, beam_spacing=False, PA_min=None,
-                         PA_max=None, exclude_PA=False, mask_frame='disk',
+                         resample=1, beam_spacing=False, mask_frame='disk',
                          unit='Jy/beam', assume_correlated=True,
                          skip_empty_annuli=True):
         """
@@ -68,6 +68,16 @@ class imagecube:
             dr_bin (Optional[float]): Width of the annuli to split the
                 integrated region into. Default is quater of the beam major
                 axis.
+            PA_min (Optional[float]): Minimum polar angle of the segment of the
+                annulus in [degrees]. Note this is the polar angle, not the
+                position angle.
+            PA_max (Optional[float]): Maximum polar angle of the segment of the
+                annulus in [degrees]. Note this is the polar angle, not the
+                position angle.
+            exclude_PA (Optional[bool]): If ``True``, exclude the provided
+                polar angle range rather than include it.
+            abs_PA (Optional[bool]): If ``True``, take the absolute value of
+                the polar angle such that it runs from 0 [deg] to 180 [deg].
             x0 (Optional[float]): Source center offset along the x-axis in
                 [arcsec].
             y0 (Optional[float]): Source center offset along the y-axis in
@@ -86,7 +96,7 @@ class imagecube:
                 this is a valid function.
             mstar (Optional[float]): Stellar mass in [Msun].
             dist (Optional[float]): Distance to the source in [pc].
-            resample(Optional[float/int]): Resampling parameter for the
+            resample (Optional[float/int]): Resampling parameter for the
                 deprojected spectrum. An integer specifies an average of that
                 many channels, while a float specifies the desired channel
                 width. Default is ``resample=1``.
@@ -162,7 +172,7 @@ class imagecube:
                                            beam_spacing=beam_spacing,
                                            PA_min=PA_min, PA_max=PA_max,
                                            exclude_PA=exclude_PA,
-                                           as_ensemble=True,
+                                           abs_PA=abs_PA, as_ensemble=True,
                                            mask_frame=mask_frame)
                 x, y, dy = annulus.deprojected_spectrum(vrot=v_kep[ridx],
                                                         resample=resample,
@@ -211,7 +221,8 @@ class imagecube:
                             y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
                             phi=1.0, z_func=None, mstar=1.0, dist=100.,
                             resample=1, beam_spacing=False, PA_min=None,
-                            PA_max=None, exclude_PA=False, mask_frame='disk',
+                            PA_max=None, exclude_PA=False, abs_PA=False,
+                            mask_frame='disk',
                             assume_correlated=False, skip_empty_annuli=True):
         """
         Return the integrated spectrum over a given radial range, returning a
@@ -275,6 +286,8 @@ class imagecube:
                 the sky-plane.
             exclude_PA (Optional[bool]): Whether to exclude pixels where
                 ``PA_min <= PA_pix <= PA_max``.
+            abs_PA (Optional[bool]): If ``True``, take the absolute value of
+                the polar angle such that it runs from 0 [deg] to 180 [deg].
             mask_frame (Optional[str]): Which frame the radial and azimuthal
                 mask is specified in, either ``'disk'`` or ``'sky'``.
             assume_correlated (Optional[bool]): Whether to treat the spectra
@@ -299,11 +312,18 @@ class imagecube:
                                          resample=resample,
                                          beam_spacing=beam_spacing,
                                          PA_min=PA_min, PA_max=PA_max,
-                                         exclude_PA=exclude_PA,
+                                         exclude_PA=exclude_PA, abs_PA=abs_PA,
                                          mask_frame=mask_frame,
                                          assume_correlated=assume_correlated,
                                          skip_empty_annuli=skip_empty_annuli)
-        nbeams = np.pi * (r_max**2 - r_min**2)
+
+        # Calculate the area of the mask.
+        mask = self.get_mask(r_min=r_min, r_max=r_max, PA_min=PA_min,
+                             PA_max=PA_max, exclude_PA=exclude_PA,
+                             abs_PA=abs_PA, mask_frame=mask_frame, x0=x0,
+                             y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
+                             phi=phi, z_func=z_func)
+        nbeams = np.sum(mask is True) * self.dpix**2
         nbeams /= self._calculate_beam_area_arcsec()
         return x, y * nbeams, dy * nbeams
 
@@ -539,7 +559,7 @@ class imagecube:
     def _radial_profile_2D(self, rvals=None, rbins=None, x0=0.0, y0=0.0,
                            inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0, phi=1.0,
                            z_func=None, PA_min=None, PA_max=None,
-                           exclude_PA=False, mask_frame='disk',
+                           exclude_PA=False, abs_PA=False, mask_frame='disk',
                            assume_correlated=False, percentiles=False):
         """
         Returns the radial profile if `self.data.ndim == 2`, i.e., if shifting
@@ -566,9 +586,9 @@ class imagecube:
         rbins, rvals = self.radial_sampling(rbins=rbins, rvals=rvals)
         mask = self.get_mask(r_min=rbins[0], r_max=rbins[-1], PA_min=PA_min,
                              PA_max=PA_max, exclude_PA=exclude_PA,
-                             mask_frame=mask_frame, x0=x0, y0=y0, inc=inc,
-                             PA=PA, z0=z0, psi=psi, z1=z1, phi=phi,
-                             z_func=z_func)
+                             abs_PA=abs_PA, mask_frame=mask_frame, x0=x0,
+                             y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
+                             phi=phi, z_func=z_func)
         if mask.shape != self.data.shape:
             raise ValueError("Mismatch in mask and data shape.")
         mask = mask.flatten()
@@ -784,11 +804,11 @@ class imagecube:
     # -- Annulus Masking Functions -- #
 
     def get_annulus(self, r_min, r_max, PA_min=None, PA_max=None,
-                    exclude_PA=False, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
-                    psi=1.0, z1=0.0, phi=1.0, z_func=None, mask=None,
-                    mask_frame='disk', beam_spacing=True, return_theta=True,
-                    as_annulus=True, suppress_warnings=True, remove_empty=True,
-                    sort_spectra=True, **kwargs):
+                    exclude_PA=False, abs_PA=False, x0=0.0, y0=0.0, inc=0.0,
+                    PA=0.0, z0=0.0, psi=1.0, z1=0.0, phi=1.0, z_func=None,
+                    mask=None, mask_frame='disk', beam_spacing=True,
+                    return_theta=True, as_annulus=True, suppress_warnings=True,
+                    remove_empty=True, sort_spectra=True, **kwargs):
         """
         Return an annulus (or section of), of spectra and their polar angles.
         Can select spatially independent pixels within the annulus, however as
@@ -803,8 +823,10 @@ class imagecube:
             PA_max (Optional[float]): Maximum polar angle of the segment of the
                 annulus in [degrees]. Note this is the polar angle, not the
                 position angle.
-            exclude_PA (Optional[bool]): If True, exclude the provided polar
-                angle range rather than include.
+            exclude_PA (Optional[bool]): If ``True``, exclude the provided
+                polar angle range rather than include.
+            abs_PA (Optional[bool]): If ``True``, take the absolute value of
+                the polar angle such that it runs from 0 [deg] to 180 [deg].
             x0 (Optional[float]): Source right ascension offset [arcsec].
             y0 (Optional[float]): Source declination offset [arcsec].
             inc (Optional[float]): Source inclination [deg].
@@ -844,9 +866,9 @@ class imagecube:
         if mask is None:
             mask = self.get_mask(r_min=r_min, r_max=r_max, exclude_r=False,
                                  PA_min=PA_min, PA_max=PA_max,
-                                 exclude_PA=exclude_PA, x0=x0, y0=y0, inc=inc,
-                                 PA=PA, z0=z0, psi=psi, z1=z1, phi=phi,
-                                 z_func=z_func, mask_frame=mask_frame)
+                                 exclude_PA=exclude_PA, abs_PA=abs_PA, x0=x0,
+                                 y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
+                                 phi=phi, z_func=z_func, mask_frame=mask_frame)
         if mask.shape != self.data[0].shape:
             raise ValueError("`mask` is incorrect shape.")
         mask = mask.flatten()
@@ -890,9 +912,9 @@ class imagecube:
         return dvals, tvals
 
     def get_mask(self, r_min=None, r_max=None, exclude_r=False, PA_min=None,
-                 PA_max=None, exclude_PA=False, mask_frame='disk', x0=0.0,
-                 y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0, phi=1.0,
-                 z_func=None):
+                 PA_max=None, exclude_PA=False, abs_PA=False,
+                 mask_frame='disk', x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
+                 psi=1.0, z1=0.0, phi=1.0, z_func=None):
         """
         Returns a 2D mask for pixels in the given region. The mask can be
         specified in either disk-centric coordinates, ``mask_frame='disk'``,
@@ -902,18 +924,22 @@ class imagecube:
         considered.
 
         Args:
-            r_min (float): Minimum midplane radius of the annulus in [arcsec].
-            r_max (float): Maximum midplane radius of the annulus in [arcsec].
-            exclude_r (Optional[bool]): If True, exclude the provided radial
-                range rather than include.
+            r_min (Optional[float]): Minimum midplane radius of the annulus in
+                [arcsec]. Defaults to minimum deprojected radius.
+            r_max (Optional[float]): Maximum midplane radius of the annulus in
+                [arcsec]. Defaults to the maximum deprojected radius.
+            exclude_r (Optional[bool]): If ``True``, exclude the provided
+                radial range rather than include.
             PA_min (Optional[float]): Minimum polar angle of the segment of the
                 annulus in [degrees]. Note this is the polar angle, not the
                 position angle.
             PA_max (Optional[float]): Maximum polar angle of the segment of the
                 annulus in [degrees]. Note this is the polar angle, not the
                 position angle.
-            exclude_PA (Optional[bool]): If True, exclude the provided polar
-                angle range rather than include.
+            exclude_PA (Optional[bool]): If ``True``, exclude the provided
+                polar angle range rather than include it.
+            abs_PA (Optional[bool]): If ``True``, take the absolute value of
+                the polar angle such that it runs from 0 [deg] to 180 [deg].
             x0 (Optional[float]): Source center offset along the x-axis in
                 [arcsec].
             y0 (Optional[float]): Source center offset along the y-axis in
@@ -951,6 +977,7 @@ class imagecube:
         rvals, tvals = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
                                         psi=psi, z1=z1, phi=phi, z_func=z_func,
                                         frame='cylindrical')[:2]
+        tvals = abs(tvals) if abs_PA else tvals
 
         # Radial mask.
         r_min = np.nanmin(rvals) if r_min is None else r_min
@@ -1424,3 +1451,76 @@ class imagecube:
                        color=kwargs.pop('color', kwargs.pop('c', 'k')),
                        zorder=kwargs.pop('zorder', 1000), **kwargs)
         ax.add_patch(beam)
+
+    def plot_mask(self, ax, r_min=None, r_max=None, exclude_r=False,
+                  PA_min=None, PA_max=None, exclude_PA=False, abs_PA=False,
+                  mask_frame='disk', x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
+                  psi=1.0, z1=0.0, phi=1.0, z_func=None, mask_color='k',
+                  mask_alpha=0.5, contour_kwargs=None):
+        """
+        Plot the boolean mask on the provided axis to check that it makes
+        sense.
+
+        Args:
+            ax (matplotib axis instance): Axis to plot the mask.
+            r_min (Optional[float]): Minimum midplane radius of the annulus in
+                [arcsec]. Defaults to minimum deprojected radius.
+            r_max (Optional[float]): Maximum midplane radius of the annulus in
+                [arcsec]. Defaults to the maximum deprojected radius.
+            exclude_r (Optional[bool]): If ``True``, exclude the provided
+                radial range rather than include.
+            PA_min (Optional[float]): Minimum polar angle of the segment of the
+                annulus in [degrees]. Note this is the polar angle, not the
+                position angle.
+            PA_max (Optional[float]): Maximum polar angle of the segment of the
+                annulus in [degrees]. Note this is the polar angle, not the
+                position angle.
+            exclude_PA (Optional[bool]): If ``True``, exclude the provided
+                polar angle range rather than include it.
+            abs_PA (Optional[bool]): If ``True``, take the absolute value of
+                the polar angle such that it runs from 0 [deg] to 180 [deg].
+            x0 (Optional[float]): Source center offset along the x-axis in
+                [arcsec].
+            y0 (Optional[float]): Source center offset along the y-axis in
+                [arcsec].
+            inc (Optional[float]): Inclination of the disk in [degrees].
+            PA (Optional[float]): Position angle of the disk in [degrees],
+                measured east-of-north towards the redshifted major axis.
+            z0 (Optional[float]): Emission height in [arcsec] at a radius of
+                1".
+            psi (Optional[float]): Flaring angle of the emission surface.
+            z1 (Optional[float]): Correction to emission height at 1" in
+                [arcsec].
+            phi (Optional[float]): Flaring angle correction term.
+            z_func (Optional[function]): A function which provides
+                :math:`z(r)`. Note that no checking will occur to make sure
+                this is a valid function.
+            mask_color (Optional[str]): Color used for the mask lines.
+            mask_alpha (Optional[float]): The alpha value of the filled contour
+                of the masked regions. Setting ``mask_alpha=0.0`` will remove
+                the filling.
+
+            contour_kwargs (Optional[dict]): Kwargs to pass to contour for
+                drawing the mask.
+
+        Returns:
+            ax : The matplotlib axis instance.
+        """
+        # Grab the mask.
+        mask = self.get_mask(r_min=r_min, r_max=r_max, PA_min=PA_min,
+                             PA_max=PA_max, exclude_PA=exclude_PA,
+                             abs_PA=abs_PA, mask_frame=mask_frame, x0=x0,
+                             y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
+                             phi=phi, z_func=z_func)
+
+        # Set the default plotting style.
+        contour_kwargs = {} if contour_kwargs is None else contour_kwargs
+        contour_kwargs['colors'] = contour_kwargs.pop('colors', mask_color)
+        contour_kwargs['linewidths'] = contour_kwargs.pop('linewidths', 1.0)
+        contour_kwargs['linestyles'] = contour_kwargs.pop('linestyles', '-')
+
+        # Plot the contour and return the figure.
+        ax.contourf(self.xaxis, self.yaxis, mask, [-.5, .5],
+                    colors=contour_kwargs['colors'], alpha=mask_alpha)
+        ax.contour(self.xaxis, self.yaxis, mask, 1, **contour_kwargs)
+        return ax
