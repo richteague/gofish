@@ -461,7 +461,8 @@ class imagecube:
                        phi=1.0, z_func=None, mstar=1.0, dist=100., resample=1,
                        beam_spacing=False, r_min=None, r_max=None, PA_min=None,
                        PA_max=None, exclude_PA=False, abs_PA=False,
-                       mask_frame='disk', assume_correlated=True):
+                       mask_frame='disk', velo_range=None,
+                       assume_correlated=True):
         """
         Generate a radial profile from shifted and stacked spectra. There are
         different ways to collapse the spectrum into a single value using the
@@ -537,6 +538,9 @@ class imagecube:
                 the polar angle such that it runs from 0 [deg] to 180 [deg].
             mask_frame (Optional[str]): Which frame the radial and azimuthal
                 mask is specified in, either ``'disk'`` or ``'sky'``.
+            velo_range (Optional[tuple]): A tuple containing the spectral
+                range to integrate if required for the provided ``unit``. Can
+                either be a string, including units, or as channel integers.
             assume_correlated (Optional[bool]): Whether to treat the spectra
                 which are stacked as correlated, by default this is
                 ``True``. If ``False``, the uncertainty will be estimated using
@@ -561,8 +565,9 @@ class imagecube:
                                            mask_frame=mask_frame,
                                            assume_correlated=assume_correlated)
 
-        # Parse the functions.
+        # Parse the function variables.
         _flux_unit, _velo_unit = imagecube._parse_unit(unit)
+        chans = self._parse_channel(velo_range)
 
         # Grab the spectra.
         out = self.radial_spectra(rvals=rvals, rbins=rbins, x0=x0, y0=y0,
@@ -580,7 +585,9 @@ class imagecube:
         # Collapse the spectra to a radial profile.
         if _velo_unit is not None:
             scale = 1e0 if _velo_unit == 'm/s' else 1e-3
-            profile = np.array([np.trapz(s[1], s[0] * scale) for s in spectra])
+            profile = np.array([np.trapz(s[1][chans[0]:chans[1]+1],
+                                         s[0][chans[0]:chans[1]+1] * scale)
+                                for s in spectra])
         else:
             profile = np.nanmax(spectra[:, 1], axis=-1)
         if profile.size != rvals.size:
@@ -589,11 +596,32 @@ class imagecube:
         # Basic approximation of uncertainty.
         if _velo_unit is not None:
             sigma = np.mean(np.diff(spectra[:, 0], axis=-1), axis=-1) * scale
-            sigma = np.sum(spectra[:, 2]**2 * sigma[:, None]**2, axis=-1)**0.5
+            sigma = spectra[:, 2, chans[0]:chans[1]+1]**2 * sigma[:, None]**2
+            sigma = np.sum(sigma, axis=-1)**0.5
         else:
             sigma = np.argmax(spectra[:, 1], axis=-1)
             sigma = np.array([f[i] for f, i in zip(spectra[:, 2], sigma)])
         return rvals, profile, sigma
+
+    def _parse_channel(self, unit):
+        """Return the channel numbers based on the provided input."""
+        _units = []
+        if unit is None:
+            return 0, self.velax.size-1
+        for u in unit:
+            if isinstance(u, int):
+                _units += [u]
+            elif isinstance(u, str):
+                u = u.lower()
+                if 'km/s' in u:
+                    _velo = float(u.replace('km/s', '')) * 1e3
+                    _units += [abs(self.velax - _velo).argmin()]
+                elif 'm/s' in u:
+                    _velo = float(u.replace('m/s', ''))
+                    _units += [abs(self.velax - _velo).argmin()]
+            else:
+                raise ValueError("Unrecognised `velo_range` unit.")
+        return int(min(_units)), int(max(_units))
 
     @staticmethod
     def _parse_unit(unit):
