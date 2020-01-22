@@ -456,12 +456,12 @@ class imagecube:
                                  mask_frame=mask_frame, unit=unit)]
         return rvals, np.squeeze(spectra)
 
-    def radial_profile(self, rvals=None, rbins=None, unit='Jy m/s', x0=0.0,
-                       y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
-                       phi=1.0, z_func=None, mstar=1.0, dist=100., resample=1,
-                       beam_spacing=False, r_min=None, r_max=None, PA_min=None,
-                       PA_max=None, exclude_PA=False, abs_PA=False,
-                       mask_frame='disk', velo_range=None,
+    def radial_profile(self, rvals=None, rbins=None, unit='Jy/beam m/s',
+                       x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0,
+                       z1=0.0, phi=1.0, z_func=None, mstar=1.0, dist=100.,
+                       resample=1, beam_spacing=False, r_min=None, r_max=None,
+                       PA_min=None, PA_max=None, exclude_PA=False,
+                       abs_PA=False, mask_frame='disk', velo_range=None,
                        assume_correlated=True):
         """
         Generate a radial profile from shifted and stacked spectra. There are
@@ -1602,11 +1602,12 @@ class imagecube:
             ax : The matplotlib axis instance.
         """
         # Grab the mask.
-        mask = self.get_mask(r_min=r_min, r_max=r_max, PA_min=PA_min,
-                             PA_max=PA_max, exclude_PA=exclude_PA,
-                             abs_PA=abs_PA, mask_frame=mask_frame, x0=x0,
-                             y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
-                             phi=phi, z_func=z_func)
+        mask = self.get_mask(r_min=r_min, r_max=r_max, exclude_r=exclude_r,
+                             PA_min=PA_min, PA_max=PA_max,
+                             exclude_PA=exclude_PA, abs_PA=abs_PA,
+                             mask_frame=mask_frame, x0=x0, y0=y0, inc=inc,
+                             PA=PA, z0=z0, psi=psi, z1=z1, phi=phi,
+                             z_func=z_func)
 
         # Set the default plotting style.
         contour_kwargs = {} if contour_kwargs is None else contour_kwargs
