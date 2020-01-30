@@ -336,8 +336,8 @@ class imagecube:
     def radial_spectra(self, rvals=None, rbins=None, dr=None, x0=0.0,
                        y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
                        phi=1.0, z_func=None, mstar=1.0, dist=100., resample=1,
-                       beam_spacing=False, r_min=None, r_max=None, PA_min=None,
-                       PA_max=None, exclude_PA=None, abs_PA=False,
+                       beam_spacing=False, r_min=None, r_max=None,
+                       PA_min=None, PA_max=None, exclude_PA=None, abs_PA=False,
                        mask_frame='disk', assume_correlated=True,
                        unit='Jy/beam'):
         """
@@ -399,7 +399,7 @@ class imagecube:
                 the disk-frame, unlike the position angle which is measured in
                 the sky-plane.
             exclude_PA (Optional[bool]): Whether to exclude pixels where
-                ``PA_min <= PA_pix <= PA_max``.
+                ``PA_min <= PA_pix <= PA_max``. Default is ``False``.
             abs_PA (Optional[bool]): If ``True``, take the absolute value of
                 the polar angle such that it runs from 0 [deg] to 180 [deg].
             mask_frame (Optional[str]): Which frame the radial and azimuthal
@@ -1532,6 +1532,52 @@ class imagecube:
         ax.set_xlabel('Offset (arcsec)')
         ax.set_ylabel('Offset (arcsec)')
         self._plot_beam(ax=ax)
+
+    def plot_teardrop(self, inc, PA, mstar, dist, ax=None, rvals=None,
+                      rbins=None, dr=None, x0=0.0, y0=0.0, z0=0.0, psi=1.0,
+                      z1=0.0, phi=0.0, z_func=None, resample=1,
+                      beam_spacing=False, r_min=None, r_max=None,
+                      PA_min=None, PA_max=None, exclude_PA=False, abs_PA=False,
+                      mask_frame='disk', unit='Jy/beam', imshow_kwargs=None):
+        """
+        Make a `teardrop` plot. For argument descriptions see
+        ``radial_spectra``. For all properties related to ``imshow``, include
+        them in ``imshow_kwargs`` as a dictionary, e.g.
+
+            imshow_kwargs = dict(cmap='inferno', vmin=0.0, vmax=1.0)
+
+        This will override any of the default style parameters.
+        """
+        # Grab the spectra.
+        out = self.radial_spectra(rbins=rbins, rvals=rvals, dr=dr, x0=x0,
+                                  y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
+                                  phi=phi, z_func=z_func, mstar=mstar,
+                                  dist=dist, resample=resample,
+                                  beam_spacing=beam_spacing, r_min=r_min,
+                                  r_max=r_max, PA_min=PA_min, PA_max=PA_max,
+                                  exclude_PA=exclude_PA, abs_PA=abs_PA,
+                                  mask_frame=mask_frame, unit=unit)
+        rvals, spectra = out
+        velax = spectra[0, 0]
+
+        # Generate the axes.
+        if ax is None:
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots()
+
+        # Plot the figure.
+        extent = [velax[0], velax[-1], rvals[0], rvals[-1]]
+        imshow_kwargs = {} if imshow_kwargs is None else imshow_kwargs
+        imshow_kwargs['origin'] = imshow_kwargs.pop('origin', 'lower')
+        imshow_kwargs['cmap'] = imshow_kwargs.pop('cmap', 'inferno')
+        imshow_kwargs['aspect'] = imshow_kwargs.pop('aspect', 'auto')
+        imshow_kwargs['extent'] = imshow_kwargs.pop('extent', extent)
+        im = ax.imshow(spectra[:, 1], **imshow_kwargs)
+        cb = plt.colorbar(im, pad=0.02)
+        cb.set_label('({})'.format(unit), rotation=270, labelpad=13)
+        ax.set_xlabel('Velocity (m/s)')
+        ax.set_ylabel('Radius (arcsec)')
+        return ax
 
     def plot_beam(self, ax, x0=0.1, y0=0.1, **kwargs):
         """
