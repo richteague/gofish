@@ -32,7 +32,7 @@ class imagecube:
 
     # -- Fishing Functions -- #
 
-    def average_spectrum(self, r_min=None, r_max=None, dr_bin=None,
+    def average_spectrum(self, r_min=None, r_max=None, dr=None,
                          PA_min=None, PA_max=None, exclude_PA=False,
                          abs_PA=False, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
                          psi=1.0, z1=0.0, phi=1.0, z_func=None, mstar=1.0,
@@ -65,8 +65,8 @@ class imagecube:
                 integrate.
             r_max (Optional[float]): Outer radius in [arcsec] of the region to
                 integrate.
-            dr_bin (Optional[float]): Width of the annuli to split the
-                integrated region into. Default is quater of the beam major
+            dr (Optional[float]): Width of the annuli to split the integrated
+                region into in [arcsec]. Default is quater of the beam major
                 axis.
             PA_min (Optional[float]): Minimum polar angle of the segment of the
                 annulus in [degrees]. Note this is the polar angle, not the
@@ -136,18 +136,16 @@ class imagecube:
         # Check is cube is 2D.
         self._test_2D()
 
-        # Radial sampling. Try to get as close to r_bin as possible.
-        _, r_tmp = self.radial_sampling(rbins=None, rvals=None)
-        r_min = r_tmp[0] if r_min is None else r_min
-        if r_min == 0.0:
-            r_min = self.dpix
-            print("WARNING: Setting `r_min = cube.dpix` for safety.")
-        r_max = r_tmp[-1] if r_max is None else r_max
-        dr_bin = 0.25 * self.bmaj if dr_bin is None else dr_bin
-        dr_bin = min((r_max - r_min), dr_bin)
-        n_bin = int(np.ceil((r_max - r_min) / dr_bin))
-        rvals = np.linspace(r_min, r_max, n_bin)
-        rbins, _ = self.radial_sampling(rvals=rvals)
+        # Get the integration ranges.
+        if r_min is None and r_max is None:
+            rbins, rvals = self.radial_sampling(rbins=None, rvals=None, dr=dr)
+            r_min, r_max = rbins[0], rbins[-1]
+
+        # Figure out the radial binning.
+        dr = 0.25 * self.bmaj if dr is None else dr
+        nbins = max(1, int(np.floor((r_max - r_min) / dr)))
+        rbins = np.linspace(r_min, r_max, nbins + 1)
+        _, rvals = self.radial_sampling(rbins=rbins)
 
         # Keplerian velocity at the annulus centers.
         v_kep = self._keplerian(rvals=rvals, mstar=mstar, dist=dist, inc=inc,
@@ -222,7 +220,7 @@ class imagecube:
             scatter *= 1e3
         return x, spectrum, scatter
 
-    def integrated_spectrum(self, r_min=None, r_max=None, dr_bin=None, x0=0.0,
+    def integrated_spectrum(self, r_min=None, r_max=None, dr=None, x0=0.0,
                             y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
                             phi=1.0, z_func=None, mstar=1.0, dist=100.,
                             resample=1, beam_spacing=False, PA_min=None,
@@ -254,9 +252,9 @@ class imagecube:
                 integrate.
             r_max (Optional[float]): Outer radius in [arcsec] of the region to
                 integrate.
-            dr_bin (Optional[float]): Width of the annuli to split the
-                integrated region into. Default is quater of the beam major
-                axis.
+            dr (Optional[float]): Width of the annuli to split the
+                integrated region into in [arcsec]. Default is quater of the
+                beam major axis.
             x0 (Optional[float]): Source center offset along the x-axis in
                 [arcsec].
             y0 (Optional[float]): Source center offset along the y-axis in
@@ -314,9 +312,9 @@ class imagecube:
         self._test_2D()
 
         # Get average spectrum.
-        x, y, dy = self.average_spectrum(r_min=r_min, r_max=r_max,
-                                         dr_bin=dr_bin, x0=x0, y0=y0, inc=inc,
-                                         PA=PA, z0=z0, psi=psi, z1=z1, phi=phi,
+        x, y, dy = self.average_spectrum(r_min=r_min, r_max=r_max, dr=dr,
+                                         x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
+                                         psi=psi, z1=z1, phi=phi,
                                          z_func=z_func, mstar=mstar, dist=dist,
                                          resample=resample,
                                          beam_spacing=beam_spacing,
@@ -335,12 +333,13 @@ class imagecube:
         nb = np.sum(mask) * self.dpix**2 / self._calculate_beam_area_arcsec()
         return x, y * nb, dy * nb
 
-    def radial_spectra(self, rvals=None, rbins=None, x0=0.0, y0=0.0, inc=0.0,
-                       PA=0.0, z0=0.0, psi=1.0, z1=0.0, phi=1.0, z_func=None,
-                       mstar=1.0, dist=100., resample=1, beam_spacing=False,
-                       r_min=None, r_max=None, PA_min=None, PA_max=None,
-                       exclude_PA=None, abs_PA=False, mask_frame='disk',
-                       assume_correlated=True, unit='Jy/beam'):
+    def radial_spectra(self, rvals=None, rbins=None, dr=None, x0=0.0,
+                       y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
+                       phi=1.0, z_func=None, mstar=1.0, dist=100., resample=1,
+                       beam_spacing=False, r_min=None, r_max=None, PA_min=None,
+                       PA_max=None, exclude_PA=None, abs_PA=False,
+                       mask_frame='disk', assume_correlated=True,
+                       unit='Jy/beam'):
         """
         Return shifted and stacked spectra, either integrated flux or average
         spectrum, along the provided radial profile. Possible units for the
@@ -358,6 +357,9 @@ class imagecube:
                 [arcsec]. You need only specify one of ``rvals`` and ``rbins``.
             rbins (Optional[floats]): Array of bin edges for the profile in
                 [arcsec]. You need only specify one of ``rvals`` and ``rbins``.
+            dr (Optional[float]): Width of the radial bins in [arcsec] to
+                use if neither ``rvals`` nor ``rbins`` is set. Default is 1/4
+                of the beam major axis.
             x0 (Optional[float]): Source center offset along the x-axis in
                 [arcsec].
             y0 (Optional[float]): Source center offset along the y-axis in
@@ -423,7 +425,7 @@ class imagecube:
         self._test_2D()
 
         # Radial sampling with radial boundaries.
-        rbins, rvals = self.radial_sampling(rbins=rbins, rvals=rvals)
+        rbins, rvals = self.radial_sampling(rbins=rbins, rvals=rvals, dr=dr)
         r_min = rbins[0] if r_min is None else r_min
         r_max = rbins[-1] if r_max is None else r_max
         idx_a = 0 if r_min <= rbins[0] else np.argmax(rbins >= r_min)
@@ -435,7 +437,7 @@ class imagecube:
         for r_min, r_max in zip(rbins[:-1], rbins[1:]):
             if unit.lower() == 'jy' or unit.lower() == 'mjy':
                 func = self.integrated_spectrum
-                spectra += [func(r_min=r_min, r_max=r_max, x0=x0, y0=y0,
+                spectra += [func(r_min=r_min, r_max=r_max, dr=dr, x0=x0, y0=y0,
                                  inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
                                  phi=phi, z_func=z_func, mstar=mstar,
                                  dist=dist, resample=resample,
@@ -445,7 +447,7 @@ class imagecube:
                                  assume_correlated=assume_correlated)]
             else:
                 func = self.average_spectrum
-                spectra += [func(r_min=r_min, r_max=r_max, x0=x0, y0=y0,
+                spectra += [func(r_min=r_min, r_max=r_max, dr=dr, x0=x0, y0=y0,
                                  inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
                                  phi=phi, z_func=z_func, mstar=mstar,
                                  dist=dist, resample=resample,
@@ -456,13 +458,13 @@ class imagecube:
                                  mask_frame=mask_frame, unit=unit)]
         return rvals, np.squeeze(spectra)
 
-    def radial_profile(self, rvals=None, rbins=None, unit='Jy/beam m/s',
-                       x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0,
-                       z1=0.0, phi=1.0, z_func=None, mstar=1.0, dist=100.,
-                       resample=1, beam_spacing=False, r_min=None, r_max=None,
-                       PA_min=None, PA_max=None, exclude_PA=False,
-                       abs_PA=False, mask_frame='disk', velo_range=None,
-                       assume_correlated=True):
+    def radial_profile(self, rvals=None, rbins=None, dr=None,
+                       unit='Jy/beam m/s', x0=0.0, y0=0.0, inc=0.0, PA=0.0,
+                       z0=0.0, psi=1.0, z1=0.0, phi=1.0, z_func=None,
+                       mstar=1.0, dist=100., resample=1, beam_spacing=False,
+                       r_min=None, r_max=None, PA_min=None, PA_max=None,
+                       exclude_PA=False, abs_PA=False, mask_frame='disk',
+                       velo_range=None, assume_correlated=True):
         """
         Generate a radial profile from shifted and stacked spectra. There are
         different ways to collapse the spectrum into a single value using the
@@ -492,6 +494,9 @@ class imagecube:
                 [arcsec]. You need only specify one of ``rvals`` and ``rbins``.
             rbins (Optional[floats]): Array of bin edges for the profile in
                 [arcsec]. You need only specify one of ``rvals`` and ``rbins``.
+            dr (Optional[float]): Width of the radial bins in [arcsec] to
+                use if neither ``rvals`` nor ``rbins`` is set. Default is 1/4
+                of the beam major axis.
             unit (Optional[str]): Unit for the y-axis of the profile, as
                 in the function description.
             x0 (Optional[float]): Source center offset along the x-axis in
@@ -554,14 +559,13 @@ class imagecube:
         """
         # If shifting not available, change function.
         if self.data.ndim == 2:
-            return self._radial_profile_2D(rvals=rvals, rbins=rbins, x0=x0,
-                                           y0=y0, inc=inc, PA=PA, z0=z0,
+            return self._radial_profile_2D(rvals=rvals, rbins=rbins, dr=dr,
+                                           x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
                                            psi=psi, z1=z1, phi=phi,
                                            z_func=z_func, r_min=r_min,
                                            r_max=r_max, PA_min=PA_min,
-                                           PA_max=PA_max,
+                                           PA_max=PA_max, abs_PA=abs_PA,
                                            exclude_PA=exclude_PA,
-                                           abs_PA=abs_PA,
                                            mask_frame=mask_frame,
                                            assume_correlated=assume_correlated)
 
@@ -570,9 +574,9 @@ class imagecube:
         chans = self._parse_channel(velo_range)
 
         # Grab the spectra.
-        out = self.radial_spectra(rvals=rvals, rbins=rbins, x0=x0, y0=y0,
-                                  inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
-                                  phi=phi, z_func=z_func, mstar=mstar,
+        out = self.radial_spectra(rvals=rvals, rbins=rbins, dr=dr,
+                                  x0=x0, y0=y0, inc=inc, PA=PA, z0=z0, psi=psi,
+                                  z1=z1, phi=phi, z_func=z_func, mstar=mstar,
                                   dist=dist, resample=resample,
                                   beam_spacing=beam_spacing, r_min=r_min,
                                   r_max=r_max, PA_min=PA_min, PA_max=PA_max,
@@ -643,12 +647,12 @@ class imagecube:
         if self.data.ndim == 2:
             raise ValueError("Cube is only 2D. Shifting not available.")
 
-    def _radial_profile_2D(self, rvals=None, rbins=None, x0=0.0, y0=0.0,
-                           inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0, phi=1.0,
-                           z_func=None, r_min=None, r_max=None, PA_min=None,
-                           PA_max=None, exclude_PA=False, abs_PA=False,
-                           mask_frame='disk', assume_correlated=False,
-                           percentiles=False):
+    def _radial_profile_2D(self, rvals=None, rbins=None, dr=None, x0=0.0,
+                           y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
+                           phi=1.0, z_func=None, r_min=None, r_max=None,
+                           PA_min=None, PA_max=None, exclude_PA=False,
+                           abs_PA=False, mask_frame='disk',
+                           assume_correlated=False, percentiles=False):
         """
         Returns the radial profile if `self.data.ndim == 2`, i.e., if shifting
         cannot be performed. Uses all the same parameters, but does not do any
@@ -666,12 +670,12 @@ class imagecube:
 
         # Warning message.
         if self.verbose:
-            print("Attached data is not 3D, so shifting cannot be applied. " +
-                  "\nReverting to standard azimuthal averaging; " +
+            print("WARNING: Attached data is not 3D, so shifting cannot be " +
+                  "applied.\n\t Reverting to standard azimuthal averaging; " +
                   "will ignore `unit` argument.")
 
         # Calculate the mask.
-        rbins, rvals = self.radial_sampling(rbins=rbins, rvals=rvals)
+        rbins, rvals = self.radial_sampling(rbins=rbins, rvals=rvals, dr=dr)
         mask = self.get_mask(r_min=rbins[0], r_max=rbins[-1], PA_min=PA_min,
                              PA_max=PA_max, exclude_PA=exclude_PA,
                              abs_PA=abs_PA, mask_frame=mask_frame, x0=x0,
@@ -1091,7 +1095,7 @@ class imagecube:
             raise ValueError("There are zero pixels in the mask.")
         return mask
 
-    def radial_sampling(self, rbins=None, rvals=None, spacing=0.25):
+    def radial_sampling(self, rbins=None, rvals=None, dr=None):
         """
         Return bins and bin center values. If the desired bin edges are known,
         will return the bin edges and vice versa. If neither are known will
@@ -1100,8 +1104,8 @@ class imagecube:
         Args:
             rbins (Optional[list]): List of bin edges.
             rvals (Optional[list]): List of bin centers.
-            spacing (Optional[float]): Spacing of bin centers in units of beam
-                major axis.
+            dr (Optional[float]): Spacing of bin centers in [arcsec]. Defaults
+                to a quarter of the beam major axis.
 
         Returns:
             rbins (list): List of bin edges.
@@ -1113,12 +1117,13 @@ class imagecube:
             try:
                 dr = np.diff(rvals)[0] * 0.5
             except IndexError:
-                dr = spacing * self.bmaj * 0.5
+                dr = 0.125 * self.bmaj
             rbins = np.linspace(rvals[0] - dr, rvals[-1] + dr, len(rvals) + 1)
         if rbins is not None:
             rvals = np.average([rbins[1:], rbins[:-1]], axis=0)
         else:
-            rbins = np.arange(0, self.xaxis.max(), spacing * self.bmaj)[1:]
+            dr = 0.25 * self.bmaj if dr is None else dr
+            rbins = np.arange(0, self.xaxis.max(), dr)
             rvals = np.average([rbins[1:], rbins[:-1]], axis=0)
         return rbins, rvals
 
