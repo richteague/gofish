@@ -1388,7 +1388,10 @@ class imagecube:
             try:
                 nu = self.header['restfrq']
             except KeyError:
-                nu = self.header['crval3']
+                try:
+                    nu = self.header['crval3']
+                except KeyError:
+                    nu = np.nan
         return nu
 
     def _readvelocityaxis(self):
