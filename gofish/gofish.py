@@ -849,7 +849,7 @@ class imagecube:
                     SNR[j, i] = np.nan
 
         # Determine the optimum position.
-        self._plot_center(x0s, y0s, SNR, normalize)
+        self.plot_center(x0s, y0s, SNR, normalize)
         return x0s, y0s, SNR
 
     def _integrated_SNR(self, x, y, dy, mask):
