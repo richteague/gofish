@@ -1534,7 +1534,7 @@ class imagecube:
         ax.set_ylim(y0s[0], y0s[-1])
         ax.set_xlabel('Offset (arcsec)')
         ax.set_ylabel('Offset (arcsec)')
-        self._plot_beam(ax=ax)
+        self.plot_beam(ax=ax)
 
     def plot_teardrop(self, inc, PA, mstar, dist, ax=None, rvals=None,
                       rbins=None, dr=None, x0=0.0, y0=0.0, z0=0.0, psi=1.0,
