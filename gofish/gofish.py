@@ -2,6 +2,9 @@ import os
 import numpy as np
 from astropy.io import fits
 import scipy.constants as sc
+from .annulus import annulus
+
+__all__ = ['imagecube']
 
 
 class imagecube:
@@ -13,20 +16,24 @@ class imagecube:
 
     Args:
         path (str): Relative path to the FITS cube.
-        clip (Optional[float]): Clip the image cube down to a specific
-            field-of-view spanning a range ``(2 * clip)``, where ``clip`` is in
+        FOV (Optional[float]): Clip the image cube down to a specific
+            field-of-view spanning a range ``FOV``, where ``FOV`` is in
             [arcsec].
+        v_range (Optional[tuple]): A tuple of minimum and maximum velocities
+            to clip the velocity range to.
         verbose (Optional[bool]): Whether to print out warning messages.
     """
 
     frequency_units = {'GHz': 1e9, 'MHz': 1e6, 'kHz': 1e3, 'Hz': 1e0}
     velocity_units = {'km/s': 1e3, 'm/s': 1e0}
 
-    def __init__(self, path, clip=None, verbose=True):
+    def __init__(self, path, FOV=None, velocity_range=None, verbose=True):
         self._read_FITS(path)
         self.verbose = verbose
-        if clip is not None:
-            self._clip_cube(clip)
+        if FOV is not None:
+            self._clip_cube_spatial(FOV/2.0)
+        if velocity_range is not None:
+            self._clip_cube_velocity(*velocity_range)
         if self.data.ndim != 3 and self.verbose:
             print("WARNING: Provided cube is only 2D. Shifting not available.")
 
@@ -849,7 +856,7 @@ class imagecube:
                     SNR[j, i] = np.nan
 
         # Determine the optimum position.
-        self.plot_center(x0s, y0s, SNR, normalize)
+        self._plot_center(x0s, y0s, SNR, normalize)
         return x0s, y0s, SNR
 
     def _integrated_SNR(self, x, y, dy, mask):
@@ -899,8 +906,7 @@ class imagecube:
                     exclude_PA=False, abs_PA=False, x0=0.0, y0=0.0, inc=0.0,
                     PA=0.0, z0=0.0, psi=1.0, z1=0.0, phi=1.0, z_func=None,
                     mask=None, mask_frame='disk', beam_spacing=True,
-                    return_theta=True, as_annulus=True, suppress_warnings=True,
-                    remove_empty=True, sort_spectra=True, **kwargs):
+                    annulus_kwargs=None):
         """
         Return an annulus (or section of), of spectra and their polar angles.
         Can select spatially independent pixels within the annulus, however as
@@ -944,8 +950,6 @@ class imagecube:
                 annulus such that each pixel is at least a beam FWHM apart. A
                 number can also be used in place of a boolean which will
                 describe the number of beam FWHMs to separate each sample by.
-            annulus (Optional[bool]): If true, return an annulus instance
-                from `eddy`. Requires `eddy` to be installed.
 
         Returns:
             If ``annulus=True``, will return an ``eddy.annulus`` instance,
@@ -996,14 +1000,10 @@ class imagecube:
                 dvals = np.vstack([dvals[start:], dvals[:start]])
                 tvals, dvals = tvals[::sampling], dvals[::sampling]
 
-        # Return the values in the requested form.
-        if as_annulus:
-            from eddy.fit_annulus import annulus
-            return annulus(spectra=dvals, theta=tvals, velax=self.velax,
-                           suppress_warnings=suppress_warnings,
-                           remove_empty=remove_empty,
-                           sort_spectra=sort_spectra)
-        return dvals, tvals
+        # Return the annulus.
+        annulus_kwargs = {} if annulus_kwargs is None else annulus_kwargs
+        return annulus(spectra=dvals, theta=tvals, velax=self.velax,
+                       **annulus_kwargs)
 
     def get_mask(self, r_min=None, r_max=None, exclude_r=False, PA_min=None,
                  PA_max=None, exclude_PA=False, abs_PA=False,
@@ -1323,8 +1323,9 @@ class imagecube:
                 self.bmaj = self.header['bmaj'] * 3600.
                 self.bmin = self.header['bmin'] * 3600.
                 self.bpa = self.header['bpa']
+            self.beamarea = self._calculate_beam_area_arcsec()
         except Exception:
-            print("WARNING: No beam values found. Assuming pixel scale.")
+            print("WARNING: No beam values found. Assuming Jy/pix scale.")
             self.bmaj = self.dpix
             self.bmin = self.dpix
             self.bpa = 0.0
@@ -1334,7 +1335,18 @@ class imagecube:
     def beam(self):
         return self.bmaj, self.bmin, self.bpa
 
-    def _clip_cube(self, radius):
+    def _clip_cube_velocity(self, v_min=None, v_max=None):
+        """Clip the cube to within ``vmin`` and ``vmax``."""
+        v_min = self.velax[0] if v_min is None else v_min
+        v_max = self.velax[-1] if v_max is None else v_max
+        i = abs(self.velax - v_min).argmin()
+        i += 1 if self.velax[i] < v_min else 0
+        j = abs(self.velax - v_max).argmin()
+        j -= 1 if self.velax[j] > v_max else 0
+        self.velax = self.velax[i:j+1]
+        self.data = self.data[i:j+1]
+
+    def _clip_cube_spatial(self, radius):
         """Clip the cube plus or minus clip arcseconds from the origin."""
         xa = abs(self.xaxis - radius).argmin()
         if self.xaxis[xa] < radius:
@@ -1534,7 +1546,7 @@ class imagecube:
         ax.set_ylim(y0s[0], y0s[-1])
         ax.set_xlabel('Offset (arcsec)')
         ax.set_ylabel('Offset (arcsec)')
-        self.plot_beam(ax=ax)
+        self._plot_beam(ax=ax)
 
     def plot_teardrop(self, inc, PA, mstar, dist, ax=None, rvals=None,
                       rbins=None, dr=None, x0=0.0, y0=0.0, z0=0.0, psi=1.0,
