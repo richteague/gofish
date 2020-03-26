@@ -490,11 +490,10 @@ class imagecube:
             - ``'km/s'``
 
         Any unit can be made up of these components is possible.
-        All conversions from [Jy/beam] to [K] are performed using the full
-        Planck law which can give rise to significant errors in integrated
-        values. Furthermore, for all integrated values, the integration is
-        performed over the entire velocity range. For other units, or to
-        supply your own integration limits, use the ``radial_spectra``.
+        All conversions from [Jy/beam] to [K] are performed using the
+        Rayleigh-Jeans approximation. For other units, or to develop more
+        sophisticated statistics for the collapsed line profiles, use the
+        ``radial_spectra`` function.
 
         Args:
             rvals (Optional[floats]): Array of bin centres for the profile in
