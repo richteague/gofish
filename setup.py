@@ -17,6 +17,5 @@ setuptools.setup(
         "numpy",
         "astropy",
         "scipy",
-        "astro-eddy",
       ]
 )
