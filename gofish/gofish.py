@@ -220,8 +220,8 @@ class imagecube:
 
         # Convert to K using RJ-approximation.
         if unit == 'k':
-            spectrum = self.jybeam_to_Tb(spectrum)
-            scatter = self.jybeam_to_Tb(scatter)
+            spectrum = self.jybeam_to_Tb_RJ(spectrum)
+            scatter = self.jybeam_to_Tb_RJ(scatter)
         if unit[0] == 'm':
             spectrum *= 1e3
             scatter *= 1e3
