@@ -60,7 +60,7 @@ class annulus(object):
             self.spectra = self.spectra[idxs]
 
         # Easier to use variables.
-        self.theta_deg = np.degrees(self.theta) % 360.
+        self.theta_deg = np.degrees(self.theta)
         self.spectra_flat = self.spectra.flatten()
 
         # Check there's actually spectra.
@@ -928,8 +928,8 @@ class annulus(object):
                          method='nearest', **kwargs)
         return vgrid, tgrid, np.where(np.isfinite(sgrid), sgrid, 0.0)
 
-    def plot_river(self, vrot=None, vrad=0.0, residual=False, resample=1,
-                   xlims=None, ylims=None, tgrid=None, return_fig=False):
+    def plot_river(self, vrot=None, vrad=0.0, residual=False, dv=None, dt=None,
+                   plot_kwargs=None, profile_kwargs=None, return_fig=False):
         """
         Make a river plot, showing how the spectra change around the azimuth.
         This is a nice way to search for structure within the data.
@@ -957,7 +957,7 @@ class annulus(object):
         """
 
         # Imports.
-        from scipy.interpolate import interp1d
+        from scipy.interpolate import interp1d, griddata
         from matplotlib.ticker import MultipleLocator
         from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 
@@ -967,31 +967,21 @@ class annulus(object):
         else:
             spectra = self._deprojected_spectra(vrot=vrot, vrad=vrad)
 
-        # Brute-force the resampling of the spectra.
-        # Will get around to updating this as some point.
-        if resample != 1:
-            if isinstance(resample, int):
-                resample = self.channel / resample
-            if not isinstance(resample, float):
-                raise TypeError('resample should be a float.')
-            velax = np.arange(self.velax[0], self.velax[-1]+resample, resample)
-            spectra = [interp1d(self.velax, s, bounds_error=False,
-                                kind='linear')(velax) for s in spectra]
-            spectra = np.squeeze(spectra)
-        else:
-            velax = self.velax.copy()
+        # Grid the spectra.
+        dv = annulus.channel if dv is None else dv
+        dt = 360.0 / (annulus.spectra.shape[0] + 1) if dt is None else dt
+        vaxis = np.arange(annulus.velax[0], annulus.velax[-1]+dv, dv)
+        taxis = np.arange(-180-dt, 180+dt, dt)
+        vpnts, tpnts = np.meshgrid(annulus.theta_deg, annulus.velax)
+        spectra = griddata((tpnts.flatten(), vpnts.flatten()),
+                           spectra.T.flatten(),
+                           (vaxis[:, None], taxis[None, :]),
+                           method='nearest').T
 
         # Get the residual if necessary.
         mean_spectrum = np.nanmean(spectra, axis=0)
         if residual:
             spectra -= mean_spectrum
-
-        # Interpolate onto a linear grid.
-        if tgrid is None:
-            tgrid = np.linspace(-np.pi, np.pi, self.theta.size)
-        spectra = [interp1d(self.theta, s, bounds_error=False)(tgrid)
-                   for s in spectra.T]
-        spectra = np.squeeze(spectra).T
 
         # Estimate the RMS.
         rms = np.nanmax(spectra)

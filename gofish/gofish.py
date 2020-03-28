@@ -179,7 +179,7 @@ class imagecube:
                                            beam_spacing=beam_spacing,
                                            PA_min=PA_min, PA_max=PA_max,
                                            exclude_PA=exclude_PA,
-                                           abs_PA=abs_PA, as_ensemble=True,
+                                           abs_PA=abs_PA,
                                            mask_frame=mask_frame)
                 x, y, dy = annulus.deprojected_spectrum(vrot=v_kep[ridx],
                                                         resample=resample,
