@@ -7,7 +7,7 @@ from .annulus import annulus
 __all__ = ['imagecube']
 
 
-class imagecube:
+class imagecube(object):
     """
     Base class containing all the FITS data. Must be a 3D cube containing two
     spatial and one velocity axis for and spectral shifting. A 2D 'cube' can
@@ -27,9 +27,15 @@ class imagecube:
     frequency_units = {'GHz': 1e9, 'MHz': 1e6, 'kHz': 1e3, 'Hz': 1e0}
     velocity_units = {'km/s': 1e3, 'm/s': 1e0}
 
-    def __init__(self, path, FOV=None, velocity_range=None, verbose=True):
+    def __init__(self, path, FOV=None, velocity_range=None, verbose=True,
+                 clip=None):
         self._read_FITS(path)
         self.verbose = verbose
+
+        if clip is not None:
+            print("WARNING: `clip` is depreciated, use `FOV` instead.")
+            FOV = clip
+
         if FOV is not None:
             self._clip_cube_spatial(FOV/2.0)
         if velocity_range is not None:
@@ -698,6 +704,12 @@ class imagecube:
             raise ValueError("Mismatch in rvals and data shape.")
         rpnts = rpnts.flatten()
 
+        # Account for the number of independent beams.
+        if assume_correlated:
+            nbeams = 2.0 * np.pi * rvals / self.bmaj
+        else:
+            nbeams = 1.0
+
         # Radial binning.
         rpnts = rpnts[mask]
         toavg = self.data.flatten()[mask]
@@ -707,11 +719,14 @@ class imagecube:
                               for r in range(1, rbins.size)]).T
             ravgs = rstat[1]
             rstds = np.array([rstat[1] - rstat[0], rstat[2] - rstat[1]])
+            rstds /= np.sqrt(nbeams)[None, :]
         else:
             ravgs = np.array([np.mean(toavg[ridxs == r])
                               for r in range(1, rbins.size)])
             rstds = np.array([np.std(toavg[ridxs == r])
                               for r in range(1, rbins.size)])
+            rstds /= np.sqrt(nbeams)
+
         return rvals, ravgs, rstds
 
     def shifted_cube(self, inc, PA, mstar, dist, x0=0.0, y0=0.0, z0=0.0,
