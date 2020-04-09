@@ -914,6 +914,17 @@ class imagecube(object):
         vkep = np.sqrt(vkep / np.power(np.hypot(r_m, z_m), 3.0))
         return vkep * np.sin(abs(np.radians(inc)))
 
+    # -- Inferring Velocity Profiles -- #
+
+    def infer_velocity_profile(self, rpnts=None, rbins=None, PA_min=None,
+                               PA_max=None, exclude_PA=False, abs_PA=False,
+                               x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
+                               psi=1.0, z1=0.0, phi=1.0, z_func=None):
+        """
+        Infer the rotational and radial velocity profiles from the data.
+        """
+        return
+
     # -- Annulus Masking Functions -- #
 
     def get_annulus(self, r_min, r_max, PA_min=None, PA_max=None,
@@ -1515,6 +1526,16 @@ class imagecube(object):
         if self.bmin == self.dpix and self.bmaj == self.dpix:
             return omega
         return np.pi * omega / 4. / np.log(2.)
+
+    def estimate_RMS(self, N=5):
+        """Estimate RMS of the cube based on first and last `N` channels."""
+        rms = np.concatenate([self.data[:int(N)], self.data[-int(N):]])
+        return np.sqrt(np.sum(rms**2) / rms.size)
+
+    @property
+    def rms(self):
+        """RMS of the cube based on the first and last 5 channels."""
+        return self.estimate_RMS(N=5)
 
     @property
     def extent(self):
