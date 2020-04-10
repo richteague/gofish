@@ -1542,6 +1542,168 @@ class imagecube(object):
         """Cube field of view for use with Matplotlib's ``imshow``."""
         return [self.xaxis[0], self.xaxis[-1], self.yaxis[0], self.yaxis[-1]]
 
+    # -- Spiral Functions -- #
+
+    def spiral_coords(self, r_p, t_p, m=None, r_min=None, r_max=None,
+                      mstar=1.0, T0=20.0, Tq=-0.5, dist=100., clockwise=True,
+                      frame_out='cartesian'):
+        """
+        Spiral coordinates from Bae & Zhaohuan (2018a). In order to recover the
+        linear spirals from Rafikov (2002), use m >> 1.
+        Args:
+            r_p (float): Orbital radius of the planet in [arcsec].
+            t_p (float): Polar angle of planet relative to the red-shifted
+                major axis of the disk in [radians].
+            m (optional[int]): Azimuthal wavenumber of the spiral. If not
+                specified, will assume the dominant term based on the rotation
+                and temperature profiles.
+            r_min (optional[float]): Inner radius of the spiral in [arcsec].
+            r_max (optional[float]): Outer radius of the spiral in [arcsec].
+            mstar (optioanl[float]): Stellar mass of the central star in [Msun]
+                to calculate the rotation profile.
+            T0 (optional[float]): Gas temperature in [K] at 1 arcsec.
+            Tq (optional[float]): Exoponent of the radial gas temperature
+                profile.
+            dist (optional[float]): Source distance in [pc] used to scale
+                [arcsec] to [au] in the calculation of the rotation profile.
+            clockwise (optional[bool]): Direction of the spiral.
+            frame_out (optional[str]): Coordinate frame of the returned values,
+                either 'cartesian' or 'cylindrical'.
+        Returns:
+            ndarray:
+                Coordinates of the spiral in either cartestian or cylindrical
+                frame.
+        """
+
+        # Define the radial grid in [arcsec].
+        r_min = 0.1 if r_min is None else r_min
+        r_max = self.xaxis.max() if r_max is None else r_max
+        rvals = np.arange(r_min, r_max, 0.1 * self.dpix)
+        clockwise = -1.0 if clockwise is True else 1.0
+
+        # Define the physical properties as a function of radius. SI units.
+        omega = np.sqrt(sc.G * mstar * 1.988e30 * (rvals * sc.au * dist)**-3)
+        tgas = T0 * np.power(rvals, Tq)
+        cs = np.sqrt(sc.k * tgas / 2.37 / sc.m_p)
+        H = cs / omega
+
+        # Define the dominant wave number if not defined.
+        if m is None:
+            m = 0.5 * (r_p * dist * sc.au / H)[abs(rvals - r_p).argmin()]
+        m = np.round(m)
+        rmn = r_p * dist * sc.au * (1.0 - 1.0 / m)**(2./3.)
+        rmp = r_p * dist * sc.au * (1.0 + 1.0 / m)**(2./3.)
+
+        # Integrate the equation numerically.
+        x = rvals * dist * sc.au
+        y = omega * np.sqrt(abs((1 - (rvals / r_p)**(3./2.))**2 - m**-2.)) / cs
+        idx_n = abs(rvals * sc.au * dist - rmn).argmin()
+        idx_p = abs(rvals * sc.au * dist - rmp).argmin()
+        phi = np.ones(rvals.size) * t_p
+
+        for i, r in enumerate(x):
+            phi[i] = t_p - np.sign(r - r_p) * np.pi / 4. / m
+            if r <= rmn:
+                phi[i] -= clockwise * np.trapz(y[i:idx_n+1][::-1],
+                                               x=x[i:idx_n+1][::-1])
+            elif r >= rmp:
+                phi[i] -= clockwise * np.trapz(y[idx_p:i+1],
+                                               x=x[idx_p:i+1])
+            else:
+                phi[i] = np.nan
+
+        # Return the spirals.
+        if frame_out == 'cylindrical':
+            return rvals, phi
+        return rvals * np.cos(phi), rvals * np.sin(phi)
+
+    def disk_to_sky(self, coords, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
+                    psi=1.0, z1=0.0, phi=0.0, z_func=None, return_idx=False,
+                    frame_in='cylindrical'):
+        """
+        For a given disk midplane coordinate, either (r, theta) or (x, y),
+        return interpolated sky coordiantes in (x, y) for plotting. The input
+        needs to be a list like: ``coords = (rvals, tvals)``.
+
+        Args:
+            coords (list): Midplane coordaintes to find in (x, y) in [arcsec,
+                arcsec] or (r, theta) in [arcsec, deg].
+            x0 (Optional[float]): Source right ascension offset [arcsec].
+            y0 (Optional[float]): Source declination offset [arcsec].
+            inc (Optional[float]): Source inclination [deg].
+            PA (Optional[float]): Source position angle [deg]. Measured
+                between north and the red-shifted semi-major axis in an
+                easterly direction.
+            z0 (Optional[float]): Aspect ratio at 1" for the emission surface.
+                To get the far side of the disk, make this number negative.
+            psi (Optional[float]): Flaring angle for the emission surface.
+            z1 (Optional[float]): Aspect ratio correction term at 1" for the
+                emission surface. Should be opposite sign to ``z0``.
+            phi (Optional[float]): Flaring angle correction term for the
+                emission surface.
+            z_func (Optional[callable]): User-defined function returning z in
+                [arcsec] at a given radius in [arcsec].
+            return_idx (Optional[bool]): If True, return the indices of the
+                nearest pixels rather than the interpolated values.
+            frame (Optional[str]): Frame of input coordinates, either
+                'cartesian' or 'polar'.
+
+        Returns:
+            x (float/int): Either the sky plane x-coordinate in [arcsec] or the
+                index of the closest pixel.
+            y (float/int): Either the sky plane y-coordinate in [arcsec] or the
+                index of the closest pixel.
+        """
+
+        # Import the necessary module.
+
+        try:
+            from scipy.interpolate import griddata
+        except Exception:
+            raise ValueError("Can't find 'scipy.interpolate.griddata'.")
+
+        # Make sure input coords are cartesian.
+
+        frame_in = frame_in.lower()
+        if frame_in not in ['cylindrical', 'cartesian']:
+            raise ValueError("frame_in must be 'cylindrical' or 'cartesian'.")
+        if frame_in == 'cylindrical':
+            xdisk = coords[0] * np.cos(np.radians(coords[1]))
+            ydisk = coords[0] * np.sin(np.radians(coords[1]))
+        else:
+            xdisk, ydisk = coords
+        xdisk, ydisk = np.squeeze(xdisk), np.squeeze(ydisk)
+
+        # Grab disk coordinates and sky coordinates to interpolate between.
+
+        xdisk_grid, ydisk_grid = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA,
+                                                  z0=z0, psi=psi, z1=z1,
+                                                  phi=phi, z_func=z_func,
+                                                  frame='cartesian')[:2]
+        xdisk_grid, ydisk_grid = xdisk_grid.flatten(), ydisk_grid.flatten()
+        xsky_grid, ysky_grid = self._get_cart_sky_coords(x0=x0, y0=y0)
+        xsky_grid, ysky_grid = xsky_grid.flatten(), ysky_grid.flatten()
+
+        xsky = griddata((xdisk_grid, ydisk_grid), xsky_grid, (xdisk, ydisk),
+                        method='nearest' if return_idx else 'linear',
+                        fill_value=np.nan)
+        ysky = griddata((xdisk_grid, ydisk_grid), ysky_grid, (xdisk, ydisk),
+                        method='nearest' if return_idx else 'linear',
+                        fill_value=np.nan)
+        xsky, ysky = np.squeeze(xsky), np.squeeze(ysky)
+
+        # Return the values or calculate the indices.
+
+        if not return_idx:
+            xsky = xsky if xsky.size > 1 else xsky[0]
+            ysky = ysky if ysky.size > 1 else ysky[0]
+            return xsky, ysky
+        xidx = np.array([abs(self.xaxis - x).argmin() for x in xsky])
+        yidx = np.array([abs(self.yaxis - y).argmin() for y in ysky])
+        xidx = xidx if xidx.size > 1 else xidx[0]
+        yidx = yidx if yidx.size > 1 else yidx[0]
+        return xidx, yidx
+
     # -- Plotting Functions -- #
 
     def plot_center(self, x0s, y0s, SNR, normalize=True):
