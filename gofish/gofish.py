@@ -1348,17 +1348,29 @@ class imagecube(object):
                 self.bmaj = self.header['bmaj'] * 3600.
                 self.bmin = self.header['bmin'] * 3600.
                 self.bpa = self.header['bpa']
-            self.beamarea = self._calculate_beam_area_arcsec()
+            self.beamarea_arcsec = self._calculate_beam_area_arcsec()
+            self.beamarea_str = self._calculate_beam_area_str()
         except Exception:
             print("WARNING: No beam values found. Assuming Jy/pix scale.")
             self.bmaj = self.dpix
             self.bmin = self.dpix
             self.bpa = 0.0
-            self.beamarea = self.dpix**2.0
+            self.beamarea_arcsec = self.dpix**2.0
+            self.beamarea_str = np.radians(self.dpix / 3600.)**2.0
 
     @property
     def beam(self):
         return self.bmaj, self.bmin, self.bpa
+
+    @property
+    def beam_per_pix(self):
+        """Number of beams per pixel."""
+        return self.dpix**2.0 / self.beamarea_arcsec
+
+    @property
+    def pix_per_beam(self):
+        """Number of pixels in a beam."""
+        return self.beamarea_arcsec / self.dpix**2.0
 
     def _clip_cube_velocity(self, v_min=None, v_max=None):
         """Clip the cube to within ``vmin`` and ``vmax``."""
