@@ -3,7 +3,7 @@
 API
 ===
 
-.. autoclass:: gofish.gofish.imagecube
+.. autoclass:: gofish.imagecube
     :inherited-members:
 
 ..

@@ -1883,6 +1883,9 @@ class imagecube(object):
 
         This will override any of the default style parameters.
         """
+        # Imports
+        import matplotlib.pyplot as plt
+
         # Grab the spectra.
         out = self.radial_spectra(rbins=rbins, rvals=rvals, dr=dr, x0=x0,
                                   y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
@@ -1897,7 +1900,6 @@ class imagecube(object):
 
         # Generate the axes.
         if ax is None:
-            import matplotlib.pyplot as plt
             fig, ax = plt.subplots()
 
         # Plot the figure.
