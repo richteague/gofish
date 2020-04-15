@@ -957,7 +957,7 @@ class annulus(object):
         """
 
         # Imports.
-        from scipy.interpolate import interp1d, griddata
+        from scipy.interpolate import griddata
         from matplotlib.ticker import MultipleLocator
         from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 
@@ -968,11 +968,11 @@ class annulus(object):
             spectra = self._deprojected_spectra(vrot=vrot, vrad=vrad)
 
         # Grid the spectra.
-        dv = annulus.channel if dv is None else dv
-        dt = 360.0 / (annulus.spectra.shape[0] + 1) if dt is None else dt
-        vaxis = np.arange(annulus.velax[0], annulus.velax[-1]+dv, dv)
+        dv = self.channel if dv is None else dv
+        dt = 360.0 / (self.spectra.shape[0] + 1) if dt is None else dt
+        vaxis = np.arange(self.velax[0], self.velax[-1]+dv, dv)
         taxis = np.arange(-180-dt, 180+dt, dt)
-        vpnts, tpnts = np.meshgrid(annulus.theta_deg, annulus.velax)
+        vpnts, tpnts = np.meshgrid(self.theta_deg, self.velax)
         spectra = griddata((tpnts.flatten(), vpnts.flatten()),
                            spectra.T.flatten(),
                            (vaxis[:, None], taxis[None, :]),
@@ -996,21 +996,19 @@ class annulus(object):
         fig, ax = plt.subplots(figsize=(6.0, 2.0))
         ax_divider = make_axes_locatable(ax)
         im = ax.imshow(spectra, origin='lower', aspect='auto', vmin=vmin,
-                       vmax=vmax, extent=[velax[0], velax[-1],
+                       vmax=vmax, extent=[self.velax[0], self.velax[-1],
                                           self.theta[0], self.theta[-1]],
                        cmap='RdBu_r' if residual else 'bone_r')
         ax.yaxis.set_major_locator(MultipleLocator(1.0))
         ax.set_xlabel('Velocity (m/s)')
         ax.set_ylabel('Polar Angle (radians)')
-        if xlims is not None:
-            ax.set_xlim(xlims[0], xlims[1])
 
         # Add the mean spectrum panel.
         if not residual:
             fig.set_size_inches(6.0, 2.5, forward=True)
             ax1 = ax_divider.append_axes('top', size='25%', pad='2%')
-            ax1.step(velax, mean_spectrum, where='mid', lw=1., c='k')
-            ax1.fill_between(velax, mean_spectrum, step='mid', color='.7')
+            ax1.step(self.velax, mean_spectrum, where='mid', lw=1., c='k')
+            ax1.fill_between(self.velax, mean_spectrum, step='mid', color='.7')
             ax1.set_ylim(3*vmin, vmax)
             ax1.set_xlim(ax.get_xlim()[0], ax.get_xlim()[1])
             ax1.set_xticklabels([])

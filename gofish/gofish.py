@@ -916,14 +916,34 @@ class imagecube(object):
 
     # -- Inferring Velocity Profiles -- #
 
-    def infer_velocity_profile(self, rpnts=None, rbins=None, PA_min=None,
+    def infer_velocity_profile(self, rbins=None, rvals=None, PA_min=None,
                                PA_max=None, exclude_PA=False, abs_PA=False,
                                x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
-                               psi=1.0, z1=0.0, phi=1.0, z_func=None):
+                               psi=1.0, z1=0.0, phi=1.0, z_func=None,
+                               mask=None, mask_frame='disk', beam_spacing=True,
+                               annulus_kwargs=None, get_vlos_kwargs=None):
         """
         Infer the rotational and radial velocity profiles from the data.
+
+        Args:
+            TBD
+
+        Returns:
+            TBD
         """
-        return
+        rbins, rpnts = self.radial_sampling(rbins=rbins, rvals=rvals)
+        get_vlos_kwargs = {} if get_vlos_kwargs is None else get_vlos_kwargs
+        get_vlos_kwargs['plots'] = get_vlos_kwargs.pop('plots', 'none')
+        returns = []
+        for ridx in range(rpnts.size):
+            annulus = self.get_annulus(r_min=rbins[ridx], r_max=rbins[ridx+1],
+                                       PA_min=PA_min, PA_max=PA_max,
+                                       exclude_PA=exclude_PA, abs_PA=abs_PA,
+                                       x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
+                                       psi=psi, z1=z1, phi=phi, z_func=z_func,
+                                       mask=mask, beam_spacing=beam_spacing)
+            returns += [annulus.get_vlos(**get_vlos_kwargs)]
+        return rpnts, np.squeeze(returns)
 
     # -- Annulus Masking Functions -- #
 
@@ -1824,9 +1844,9 @@ class imagecube(object):
 
     def plot_mask(self, ax, r_min=None, r_max=None, exclude_r=False,
                   PA_min=None, PA_max=None, exclude_PA=False, abs_PA=False,
-                  mask_frame='disk', x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
-                  psi=1.0, z1=0.0, phi=1.0, z_func=None, mask_color='k',
-                  mask_alpha=0.5, contour_kwargs=None):
+                  mask_frame='disk', mask=None, x0=0.0, y0=0.0, inc=0.0,
+                  PA=0.0, z0=0.0, psi=1.0, z1=0.0, phi=1.0, z_func=None,
+                  mask_color='k', mask_alpha=0.5, contour_kwargs=None):
         """
         Plot the boolean mask on the provided axis to check that it makes
         sense.
@@ -1877,12 +1897,15 @@ class imagecube(object):
             ax : The matplotlib axis instance.
         """
         # Grab the mask.
-        mask = self.get_mask(r_min=r_min, r_max=r_max, exclude_r=exclude_r,
-                             PA_min=PA_min, PA_max=PA_max,
-                             exclude_PA=exclude_PA, abs_PA=abs_PA,
-                             mask_frame=mask_frame, x0=x0, y0=y0, inc=inc,
-                             PA=PA, z0=z0, psi=psi, z1=z1, phi=phi,
-                             z_func=z_func)
+        if mask is None:
+            mask = self.get_mask(r_min=r_min, r_max=r_max, exclude_r=exclude_r,
+                                 PA_min=PA_min, PA_max=PA_max,
+                                 exclude_PA=exclude_PA, abs_PA=abs_PA,
+                                 mask_frame=mask_frame, x0=x0, y0=y0, inc=inc,
+                                 PA=PA, z0=z0, psi=psi, z1=z1, phi=phi,
+                                 z_func=z_func)
+        assert mask.shape[0] == self.yaxis.size, "Wrong y-axis shape for mask."
+        assert mask.shape[1] == self.xaxis.size, "Wrong x-axis shape for mask."
 
         # Set the default plotting style.
         contour_kwargs = {} if contour_kwargs is None else contour_kwargs

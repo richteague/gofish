@@ -77,6 +77,7 @@ Community Guidelines
    user/api
    user/fishing_basics
    user/fishing_advanced
+   user/fishing_masking
 
 .. General operations for integrated spectra help
 
