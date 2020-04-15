@@ -161,7 +161,7 @@ class imagecube(object):
         _, rvals = self.radial_sampling(rbins=rbins)
 
         # Keplerian velocity at the annulus centers.
-        v_kep = self._keplerian(rvals=rvals, mstar=mstar, dist=dist, inc=inc,
+        v_kep = self._keplerian(rpnts=rvals, mstar=mstar, dist=dist, inc=inc,
                                 z0=z0, psi=psi, z1=z1, phi=phi)
         v_kep = np.atleast_1d(v_kep)
 
@@ -1005,8 +1005,8 @@ class imagecube(object):
         rbins, rpnts = self.radial_sampling(rbins=rbins, rvals=rvals)
         r_min = rbins[0] if r_min is None else r_min
         r_max = rbins[-1] if r_max is None else r_max
-        mask = np.logical_and(rbins >= r_min, rbins <= r_max)
-        rbins, rpnts = self.radial_sampling(rbins=rbins[mask])
+        r_mask = np.logical_and(rbins >= r_min, rbins <= r_max)
+        rbins, rpnts = self.radial_sampling(rbins=rbins[r_mask])
 
         # Set the defauls for the get_vlos() function.
         get_vlos_kwargs = {} if get_vlos_kwargs is None else get_vlos_kwargs
