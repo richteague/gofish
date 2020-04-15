@@ -237,7 +237,7 @@ class annulus(object):
             returns[idx] = samples
         return returns[0] if len(returns) == 1 else returns
 
-    def _optimize_p0_GP(self, p0, N=1, resample=True, **kwargs):
+    def _optimize_p0_GP(self, p0, N=1, resample=True, verbose=False, **kwargs):
         """
         Optimize the starting positions, p0. We do this in a slightly hacky way
         because the minimum is not easily found. We first optimize the hyper
@@ -996,19 +996,19 @@ class annulus(object):
         fig, ax = plt.subplots(figsize=(6.0, 2.0))
         ax_divider = make_axes_locatable(ax)
         im = ax.imshow(spectra, origin='lower', aspect='auto', vmin=vmin,
-                       vmax=vmax, extent=[self.velax[0], self.velax[-1],
-                                          self.theta[0], self.theta[-1]],
+                       vmax=vmax, extent=[vaxis[0], vaxis[-1],
+                                          taxis[0], taxis[-1]],
                        cmap='RdBu_r' if residual else 'bone_r')
-        ax.yaxis.set_major_locator(MultipleLocator(1.0))
+        ax.yaxis.set_major_locator(MultipleLocator(60.0))
         ax.set_xlabel('Velocity (m/s)')
-        ax.set_ylabel('Polar Angle (radians)')
+        ax.set_ylabel('Polar Angle (deg)')
 
         # Add the mean spectrum panel.
         if not residual:
             fig.set_size_inches(6.0, 2.5, forward=True)
             ax1 = ax_divider.append_axes('top', size='25%', pad='2%')
-            ax1.step(self.velax, mean_spectrum, where='mid', lw=1., c='k')
-            ax1.fill_between(self.velax, mean_spectrum, step='mid', color='.7')
+            ax1.step(vaxis, mean_spectrum, where='mid', lw=1., c='k')
+            ax1.fill_between(vaxis, mean_spectrum, step='mid', color='.7')
             ax1.set_ylim(3*vmin, vmax)
             ax1.set_xlim(ax.get_xlim()[0], ax.get_xlim()[1])
             ax1.set_xticklabels([])

@@ -883,13 +883,13 @@ class imagecube(object):
         y_tmp = np.where(np.logical_and(mask, np.isfinite(y)), y, 0.0)
         return np.max(y_tmp) / np.nanmean(dy[~mask])
 
-    def _keplerian(self, rvals, mstar=1.0, dist=100., inc=90.0, z0=0.0,
-                   psi=1.0, z1=0.0, phi=1.0):
+    def _keplerian(self, rpnts, mstar=1.0, dist=100., inc=90.0, z0=0.0,
+                   psi=1.0, z1=0.0, phi=1.0, z_func=None):
         """
         Return a Keplerian rotation profile [m/s] at rpnts [arcsec].
 
         Args:
-            rvals (ndarray/float): Radial locations in [arcsec] to calculate
+            rpnts (ndarray/float): Radial locations in [arcsec] to calculate
                 the Keplerian rotation curve at.
             mstar (float): Mass of the central star in [Msun].
             dist (float): Distance to the source in [pc].
@@ -902,38 +902,116 @@ class imagecube(object):
                 emission surface. Should be opposite sign to z0.
             phi (Optional[float]): Flaring angle correction term for the
                 emission surface.
+            z_func (Optional[function]): A function which provides
+                :math:`z(r)`. Note that no checking will occur to make sure
+                this is a valid function.
 
         Returns:
             vkep (ndarray/float): Keplerian rotation curve [m/s] at the
                 specified radial locations.
         """
-        rvals = np.squeeze(rvals)
-        zvals = z0 * np.power(rvals, psi) + z1 * np.power(rvals, phi)
-        r_m, z_m = rvals * dist * sc.au, zvals * dist * sc.au
+        rpnts = np.squeeze(rpnts)
+        if z_func is None:
+            zvals = z0 * np.power(rpnts, psi) + z1 * np.power(rpnts, phi)
+        else:
+            zvals = z_func(rpnts)
+        r_m, z_m = rpnts * dist * sc.au, zvals * dist * sc.au
         vkep = sc.G * mstar * 1.988e30 * np.power(r_m, 2.0)
         vkep = np.sqrt(vkep / np.power(np.hypot(r_m, z_m), 3.0))
         return vkep * np.sin(abs(np.radians(inc)))
 
     # -- Inferring Velocity Profiles -- #
 
-    def infer_velocity_profile(self, rbins=None, rvals=None, PA_min=None,
-                               PA_max=None, exclude_PA=False, abs_PA=False,
-                               x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
-                               psi=1.0, z1=0.0, phi=1.0, z_func=None,
-                               mask=None, mask_frame='disk', beam_spacing=True,
-                               annulus_kwargs=None, get_vlos_kwargs=None):
+    def get_vlos(self, rvals=None, rbins=None, r_min=None, r_max=None,
+                 PA_min=None, PA_max=None, exclude_PA=False, abs_PA=False,
+                 x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
+                 phi=1.0, z_func=None, mstar=None, dist=None, mask=None,
+                 mask_frame='disk', beam_spacing=True, annulus_kwargs=None,
+                 get_vlos_kwargs=None):
         """
-        Infer the rotational and radial velocity profiles from the data.
+        Infer the rotational and radial velocity profiles from the data
+        following the approach described in `Teague et al. (2018)`_. The cube
+        will be split into annuli, with the `get_vlos()` function from
+        `annulus` being used to infer the rotational (and radial) velocities.
+        Note that to return also radial velocities, you must include
+        ``get_vlos_kwargs=dict(fit_vrad=True)``.
+
+        .. _Teague et al. 2018: https://ui.adsabs.harvard.edu/abs/2018ApJ...868..113T/abstract
 
         Args:
-            TBD
+            rvals (Optional[floats]): Array of bin centres for the profile in
+                [arcsec]. You need only specify one of ``rvals`` and ``rbins``.
+            rbins (Optional[floats]): Array of bin edges for the profile in
+                [arcsec]. You need only specify one of ``rvals`` and ``rbins``.
+            r_min (float): Minimum midplane radius of the annuli in [arcsec].
+            r_max (float): Maximum midplane radius of the annuli in [arcsec].
+            PA_min (Optional[float]): Minimum polar angle of the segment of the
+                annulus in [degrees]. Note this is the polar angle, not the
+                position angle.
+            PA_max (Optional[float]): Maximum polar angle of the segment of the
+                annulus in [degrees]. Note this is the polar angle, not the
+                position angle.
+            exclude_PA (Optional[bool]): If ``True``, exclude the provided
+                polar angle range rather than include.
+            abs_PA (Optional[bool]): If ``True``, take the absolute value of
+                the polar angle such that it runs from 0 [deg] to 180 [deg].
+            x0 (Optional[float]): Source right ascension offset [arcsec].
+            y0 (Optional[float]): Source declination offset [arcsec].
+            inc (Optional[float]): Source inclination [deg].
+            PA (Optional[float]): Source position angle [deg]. Measured
+                between north and the red-shifted semi-major axis in an
+                easterly direction.
+            z0 (Optional[float]): Aspect ratio at 1" for the emission surface.
+                To get the far side of the disk, make this number negative.
+            psi (Optional[float]): Flaring angle for the emission surface.
+            z1 (Optional[float]): Aspect ratio correction term at 1" for the
+                emission surface. Should be opposite sign to z0.
+            phi (Optional[float]): Flaring angle correction term for the
+                emission surface.
+            z_func (Optional[function]): A function which provides z(r). Note
+                that no checking will occur to make sure this is a valid
+                function.
+            mstar (Optional[float]): Stellar mass of the central star in [Msun]
+                to calculate the  starting positions for the MCMC. If
+                specified, must also provide ``dist``.
+            dist (Optional[float]): Source distance in [pc] to use to calculate
+                the starting positions for the MCMC. If specified, must also
+                provide ``mstar``.
+            mask (Optional[ndarray]): A 2D array mask which matches the shape
+                of the data.
+            mask_frame (Optional[str]): Coordinate frame for the mask. Either
+                ``'disk'`` or ``'sky'``. If ``disk`` coordinates are used then
+                the inclination and position angle of the mask are set to zero.
+            beam_spacing (Optional[bool/float]): If True, randomly sample the
+                annulus such that each pixel is at least a beam FWHM apart. A
+                number can also be used in place of a boolean which will
+                describe the number of beam FWHMs to separate each sample by.
+            annulus_kwargs (Optional[dict]): Kwargs to pass to ``get_annulus``.
+            get_vlos_kwargs (Optional[dict]): Kwargs to pass to
+                ``annulus.get_vlos``.
 
         Returns:
-            TBD
+            The radial sampling of the annuli, ``rpnts``, and a list of the
+            values returned from ``annulus.get_vlos``.
         """
+
+        # Check the input variables.
+        if mstar is not None and dist is None:
+            raise ValueError("Must specify both `mstar` and `dist`.")
+        if dist is not None and mstar is None:
+            raise ValueError("Must specify both `mstar` and `dist`.")
+
+        # Get the radial sampling.
         rbins, rpnts = self.radial_sampling(rbins=rbins, rvals=rvals)
+        r_min = rbins[0] if r_min is None else r_min
+        r_max = rbins[-1] if r_max is None else r_max
+        mask = np.logical_and(rbins >= r_min, rbins <= r_max)
+        rbins, rpnts = self.radial_sampling(rbins=rbins[mask])
+
+        # Set the defauls for the get_vlos() function.
         get_vlos_kwargs = {} if get_vlos_kwargs is None else get_vlos_kwargs
         get_vlos_kwargs['plots'] = get_vlos_kwargs.pop('plots', 'none')
+
         returns = []
         for ridx in range(rpnts.size):
             annulus = self.get_annulus(r_min=rbins[ridx], r_max=rbins[ridx+1],
@@ -942,6 +1020,19 @@ class imagecube(object):
                                        x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
                                        psi=psi, z1=z1, phi=phi, z_func=z_func,
                                        mask=mask, beam_spacing=beam_spacing)
+
+            # Starting positions if a velocity profile is given.
+            if mstar is not None:
+                vrot = self._keplerian(rpnts=rpnts[ridx], mstar=mstar,
+                                       dist=dist, inc=inc, z0=z0, psi=psi,
+                                       z1=z1, phi=phi, z_func=z_func)
+                vrad = 0.0
+                rms = self.estimate_RMS()
+                ln_sig = np.log(np.std(annulus.spectra))
+                ln_rho = np.log(150.)
+                get_vlos_kwargs['p0'] = [vrot, vrad, rms, ln_sig, ln_rho]
+            else:
+                get_vlos_kwargs['p0'] = None
             returns += [annulus.get_vlos(**get_vlos_kwargs)]
         return rpnts, np.squeeze(returns)
 
