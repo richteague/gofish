@@ -50,7 +50,7 @@ class imagecube(object):
                          abs_PA=False, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
                          psi=1.0, z1=0.0, phi=1.0, z_func=None, mstar=1.0,
                          dist=100., resample=1, beam_spacing=False,
-                         mask_frame='disk', unit='Jy/beam',
+                         mask_frame='disk', unit='Jy/beam', mask=None,
                          assume_correlated=True, skip_empty_annuli=True):
         """
         Return the averaged spectrum over a given radial range, returning a
@@ -173,6 +173,11 @@ class imagecube(object):
             print('WARNING: `resample < 1`, are you sure you want channels '
                   + 'more narrow than 1 m/s?')
 
+        # Pseduo masking. Make everything masked a NaN and then revert.
+        if mask is not None:
+            temp = self.data.copy()
+            self.data = np.where(mask, self.data, np.nan)
+
         # Get the deprojected spectrum for each annulus.
         # Have an array to describe whether an annulus is included in the
         # average or not.
@@ -203,6 +208,10 @@ class imagecube(object):
                     if self.verbose:
                         print("WARNING: " + msg + " Skipping annulus.")
 
+        # Return the data.
+        if mask is not None:
+            self.data = temp
+
         # Remove any pesky NaNs.
         spectra = np.where(np.isfinite(spectra), spectra, 0.0)
         scatter = np.where(np.isfinite(scatter), scatter, 0.0)
@@ -210,6 +219,7 @@ class imagecube(object):
         # Weight the annulus based on its area.
         weights = np.pi * (rbins[1:]**2 - rbins[:-1]**2)
         weights = weights[included.astype('bool')]
+        weights += 1e-20 * np.random.randn(weights.size)
         if weights.size != spectra.shape[0]:
             raise ValueError("Number of weights, {:d}, ".format(weights.size)
                              + "does not match number of spectra, "
@@ -351,7 +361,7 @@ class imagecube(object):
                        phi=1.0, z_func=None, mstar=1.0, dist=100., resample=1,
                        beam_spacing=False, r_min=None, r_max=None,
                        PA_min=None, PA_max=None, exclude_PA=None, abs_PA=False,
-                       mask_frame='disk', assume_correlated=True,
+                       mask_frame='disk', mask=None, assume_correlated=True,
                        unit='Jy/beam'):
         """
         Return shifted and stacked spectra, either integrated flux or average
@@ -444,6 +454,7 @@ class imagecube(object):
         idx_a = 0 if r_min <= rbins[0] else np.argmax(rbins >= r_min)
         idx_b = rbins.size if r_max >= rbins[-1] else np.argmin(rbins <= r_max)
         rbins, rvals = self.radial_sampling(rbins=rbins[idx_a:idx_b])
+        dr = np.mean(np.diff(rbins)) if dr is None else dr
 
         # Cycle through and deproject the spectra.
         spectra = []
@@ -457,7 +468,8 @@ class imagecube(object):
                                  beam_spacing=beam_spacing, PA_min=PA_min,
                                  PA_max=PA_max, exclude_PA=exclude_PA,
                                  abs_PA=abs_PA, mask_frame=mask_frame,
-                                 assume_correlated=assume_correlated)]
+                                 assume_correlated=assume_correlated,
+                                 mask=mask)]
             else:
                 func = self.average_spectrum
                 spectra += [func(r_min=r_min, r_max=r_max, dr=dr, x0=x0, y0=y0,
@@ -466,7 +478,7 @@ class imagecube(object):
                                  dist=dist, resample=resample,
                                  beam_spacing=beam_spacing, PA_min=PA_min,
                                  PA_max=PA_max, exclude_PA=exclude_PA,
-                                 abs_PA=abs_PA,
+                                 abs_PA=abs_PA, mask=mask,
                                  assume_correlated=assume_correlated,
                                  mask_frame=mask_frame, unit=unit)]
         return rvals, np.squeeze(spectra)
@@ -1939,7 +1951,8 @@ class imagecube(object):
                   PA_min=None, PA_max=None, exclude_PA=False, abs_PA=False,
                   mask_frame='disk', mask=None, x0=0.0, y0=0.0, inc=0.0,
                   PA=0.0, z0=0.0, psi=1.0, z1=0.0, phi=1.0, z_func=None,
-                  mask_color='k', mask_alpha=0.5, contour_kwargs=None):
+                  mask_color='k', mask_alpha=0.5, contour_kwargs=None,
+                  contourf_kwargs=None):
         """
         Plot the boolean mask on the provided axis to check that it makes
         sense.
@@ -2005,8 +2018,10 @@ class imagecube(object):
         contour_kwargs['colors'] = contour_kwargs.pop('colors', mask_color)
         contour_kwargs['linewidths'] = contour_kwargs.pop('linewidths', 1.0)
         contour_kwargs['linestyles'] = contour_kwargs.pop('linestyles', '-')
+        contourf_kwargs = {} if contourf_kwargs is None else contourf_kwargs
+        contourf_kwargs['alpha'] = contourf_kwargs.pop('alpha', mask_alpha)
+        contourf_kwargs['colors'] = contourf_kwargs.pop('colors', mask_color)
 
         # Plot the contour and return the figure.
-        ax.contourf(self.xaxis, self.yaxis, mask, [-.5, .5],
-                    colors=contour_kwargs['colors'], alpha=mask_alpha)
+        ax.contourf(self.xaxis, self.yaxis, mask, [-.5, .5], **contourf_kwargs)
         ax.contour(self.xaxis, self.yaxis, mask, 1, **contour_kwargs)

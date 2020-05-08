@@ -41,7 +41,7 @@ class annulus(object):
             import warnings
             warnings.filterwarnings("ignore")
 
-        # Read in the spectra and remove empty values.
+        # Read in the spectra and remove bad values.
         self.theta = theta
         self.spectra = spectra
 
@@ -863,11 +863,13 @@ class annulus(object):
                                resample.size + 1)
         else:
             raise TypeError("Resample must be a boolean, int, float or array.")
-        y, x, _ = binned_statistic(vpnts, spnts, statistic='mean', bins=bins)
+        y, x, _ = binned_statistic(vpnts, spnts, statistic=np.nanmean,
+                                   bins=bins)
         x = np.average([x[1:], x[:-1]], axis=0)
         if not scatter:
             return x, y
-        dy, _, _ = binned_statistic(vpnts, spnts, statistic='std', bins=bins)
+        dy, _, _ = binned_statistic(vpnts, spnts, statistic=np.nanstd,
+                                    bins=bins)
         return x, y, dy
 
     def _get_masked_spectrum(self, x, y):
