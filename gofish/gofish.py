@@ -22,15 +22,22 @@ class imagecube(object):
         v_range (Optional[tuple]): A tuple of minimum and maximum velocities
             to clip the velocity range to.
         verbose (Optional[bool]): Whether to print out warning messages.
+        primary_beam (Optional[str]): Path to the primary beam as a FITS file
+            to apply the correction.
     """
 
     frequency_units = {'GHz': 1e9, 'MHz': 1e6, 'kHz': 1e3, 'Hz': 1e0}
     velocity_units = {'km/s': 1e3, 'm/s': 1e0}
 
     def __init__(self, path, FOV=None, velocity_range=None, verbose=True,
-                 clip=None):
+                 clip=None, primary_beam=None):
         self._read_FITS(path)
         self.verbose = verbose
+
+        # Primary beam correction.
+        self._pb_corrected = False
+        if primary_beam is not None:
+            self.correct_PB(primary_beam)
 
         if clip is not None:
             print("WARNING: `clip` is depreciated, use `FOV` instead.")
@@ -155,7 +162,8 @@ class imagecube(object):
             r_min, r_max = rbins[0], rbins[-1]
 
         # Figure out the radial binning.
-        dr = 0.25 * self.bmaj if dr is None else dr
+        if dr is None:
+            dr = 2. * self.dpix if self.dpix == self.bmaj else self.bmaj / 4.
         nbins = max(1, int(np.floor((r_max - r_min) / dr)))
         rbins = np.linspace(r_min, r_max, nbins + 1)
         _, rvals = self.radial_sampling(rbins=rbins)
@@ -454,7 +462,6 @@ class imagecube(object):
         idx_a = 0 if r_min <= rbins[0] else np.argmax(rbins >= r_min)
         idx_b = rbins.size if r_max >= rbins[-1] else np.argmin(rbins <= r_max)
         rbins, rvals = self.radial_sampling(rbins=rbins[idx_a:idx_b])
-        dr = np.mean(np.diff(rbins)) if dr is None else dr
 
         # Cycle through and deproject the spectra.
         spectra = []
@@ -780,7 +787,7 @@ class imagecube(object):
         mask = np.logical_and(rvals >= r_min, rvals <= r_max)
 
         # Projected velocity.
-        vkep = self._keplerian(rvals=rvals, mstar=mstar, dist=dist, inc=inc,
+        vkep = self._keplerian(rpnts=rpnts, mstar=mstar, dist=dist, inc=inc,
                                z0=z0, psi=psi, z1=z1, phi=phi)
         vkep *= np.cos(tvals)
         if vkep.shape != mask.shape:
@@ -1333,6 +1340,9 @@ class imagecube(object):
         if frame not in ['cylindrical', 'cartesian']:
             raise ValueError("frame must be 'cylindrical' or 'cartesian'.")
 
+        # Apply the inclination concention.
+        inc = inc if inc < 90.0 else inc - 180.0
+
         # Define the emission surface function. Either use the simple double
         # power-law profile or the user-provied function.
 
@@ -1545,11 +1555,8 @@ class imagecube(object):
             raise ValueError("'a' must be in [0, 1].")
         a_len = self.header['naxis%d' % a]
         a_del = self.header['cdelt%d' % a]
-        a_pix = self.header['crpix%d' % a]
-        a_ref = self.header['crval%d' % a]
-        a_ref = 0.0
-        a_pix -= 0.5
-        axis = a_ref + (np.arange(a_len) - a_pix + 1.0) * a_del
+        a_pix = self.header['crpix%d' % a] - 0.5
+        axis = (np.arange(a_len) - a_pix + 1.0) * a_del
         return 3600 * axis
 
     def _readrestfreq(self):
@@ -1666,6 +1673,17 @@ class imagecube(object):
         """Estimate RMS of the cube based on first and last `N` channels."""
         rms = np.concatenate([self.data[:int(N)], self.data[-int(N):]])
         return np.sqrt(np.sum(rms**2) / rms.size)
+
+    def correct_PB(self, path):
+        """Correct for the primary beam given by ``path``."""
+        if self._pb_corrected:
+            raise ValueError("This data has already been PB corrected.")
+        pb = np.squeeze(fits.getdata(path))
+        if pb.shape == self.data.shape:
+            self.data /= pb
+        else:
+            self.data /= pb[None, :, :]
+        self._pb_corrected = True
 
     @property
     def rms(self):
