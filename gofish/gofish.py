@@ -787,7 +787,7 @@ class imagecube(object):
         mask = np.logical_and(rvals >= r_min, rvals <= r_max)
 
         # Projected velocity.
-        vkep = self._keplerian(rpnts=rpnts, mstar=mstar, dist=dist, inc=inc,
+        vkep = self._keplerian(rpnts=rvals, mstar=mstar, dist=dist, inc=inc,
                                z0=z0, psi=psi, z1=z1, phi=phi)
         vkep *= np.cos(tvals)
         if vkep.shape != mask.shape:
@@ -1282,6 +1282,96 @@ class imagecube(object):
             rvals = np.average([rbins[1:], rbins[:-1]], axis=0)
         return rbins, rvals
 
+    def background_residual(self, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
+                            psi=0.0, z1=0.0, phi=0.0, z_func=None, r_min=None,
+                            r_max=None, PA_min=None, PA_max=None,
+                            exclude_PA=False, abs_PA=False, mask_frame='disk',
+                            interp1d_kw=None, background_only=False):
+        """
+        Return the residual from an azimuthally avearged background. This is
+        most appropriate for exploring azimuthally asymmetric emission in
+        either the zeroth moment (integrated intensity) or the peak brightness
+        temperature maps. As such, this function only works for 2D data.
+
+        The coordinates provided will be used to both build the azimuthally
+        averaged profile (using the ``radial_profile`` function) and then
+        project this onto the sky-plane. Any masking parameters used here will
+        only be used when creating the azimuthally spectrum, but the residual
+        with cover the entire data.
+
+        Args:
+            x0 (Optional[float]): Source right ascension offset [arcsec].
+            y0 (Optional[float]): Source declination offset [arcsec].
+            inc (Optional[float]): Source inclination [deg].
+            PA (Optional[float]): Source position angle [deg]. Measured
+                between north and the red-shifted semi-major axis in an
+                easterly direction.
+            z0 (Optional[float]): Aspect ratio at 1" for the emission surface.
+                To get the far side of the disk, make this number negative.
+            psi (Optional[float]): Flaring angle for the emission surface.
+            z1 (Optional[float]): Aspect ratio correction term at 1" for the
+                emission surface. Should be opposite sign to z0.
+            phi (Optional[float]): Flaring angle correction term for the
+                emission surface.
+            z_func (Optional[function]): A function which provides z(r). Note
+                that no checking will occur to make sure this is a valid
+                function.
+            r_min (Optional[float]): Inner radius in [arcsec] of the region to
+                integrate. The value used will be greater than or equal to
+                ``r_min``.
+            r_max (Optional[float]): Outer radius in [arcsec] of the region to
+                integrate. The value used will be less than or equal to
+                ``r_max``.
+            PA_min (Optional[float]): Minimum polar angle to include in the
+                annulus in [degrees]. Note that the polar angle is measured in
+                the disk-frame, unlike the position angle which is measured in
+                the sky-plane.
+            PA_max (Optional[float]): Maximum polar angleto include in the
+                annulus in [degrees]. Note that the polar angle is measured in
+                the disk-frame, unlike the position angle which is measured in
+                the sky-plane.
+            exclude_PA (Optional[bool]): Whether to exclude pixels where
+                ``PA_min <= PA_pix <= PA_max``.
+            abs_PA (Optional[bool]): If ``True``, take the absolute value of
+                the polar angle such that it runs from 0 [deg] to 180 [deg].
+            mask_frame (Optional[str]): Which frame the radial and azimuthal
+                mask is specified in, either ``'disk'`` or ``'sky'``.
+            interp1d_kw (Optional[dict]): Kwargs to pass to
+                ``scipy.interpolate.interp1d``.
+            background_only (Optional[bool]): If True, return only the
+                azimuthally averaged background rather than the residual.
+                Default is ``False``.
+
+        Returns:
+            residual (array): Residual between the data and the azimuthally
+                averaged background. If ``background_only = True`` then this is
+                just the azimuthally averaged background.
+        """
+        # Check if the attached data is 2D.
+        if self.data.ndim != 2:
+            raise ValueError("Cannot azimuthally average a 3D cube.")
+
+        # Make the azimuthal profile.
+        x, y, _ = self.radial_profile(x0=x0, y0=y0, inc=inc, PA=PA,
+                                      z0=z0, phi=phi, z1=z1, psi=psi,
+                                      z_func=z_func, r_min=r_min, r_max=r_max,
+                                      PA_min=PA_min, PA_max=PA_max,
+                                      exclude_PA=exclude_PA, abs_PA=abs_PA,
+                                      mask_frame=mask_frame)
+
+        # Build the interpolation function.
+        from scipy.interpolate import interp1d
+        interp1d_kw = interp1d_kw if interp1d_kw is not None else {}
+        interp1d_kw['bounds_error'] = interp1d_kw.pop('bounds_error', False)
+        interp1d_kw['fill_value'] = interp1d_kw.pop('fill_value', np.nan)
+        avg = interp1d(x, y, **interp1d_kw)
+
+        # Return the residual (or background if requested).
+        background = avg(self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA,
+                                          z0=z0, phi=phi, z1=z1, psi=psi,
+                                          z_func=z_func)[0])
+        return background if background_only else self.data - background
+
     # -- Deprojection Functions -- #
 
     def disk_coords(self, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=0.0,
@@ -1668,6 +1758,8 @@ class imagecube(object):
         if self.bmin == self.dpix and self.bmaj == self.dpix:
             return omega
         return np.pi * omega / 4. / np.log(2.)
+
+    # -- Utilities -- #
 
     def estimate_RMS(self, N=5):
         """Estimate RMS of the cube based on first and last `N` channels."""
