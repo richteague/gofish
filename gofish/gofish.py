@@ -183,7 +183,7 @@ class imagecube(object):
 
         # Pseduo masking. Make everything masked a NaN and then revert.
         if mask is not None:
-            temp = self.data.copy()
+            saved_data = self.data.copy()
             self.data = np.where(mask, self.data, np.nan)
 
         # Get the deprojected spectrum for each annulus.
@@ -218,7 +218,7 @@ class imagecube(object):
 
         # Return the data.
         if mask is not None:
-            self.data = temp
+            self.data = saved_data
 
         # Remove any pesky NaNs.
         spectra = np.where(np.isfinite(spectra), spectra, 0.0)
@@ -256,7 +256,7 @@ class imagecube(object):
                             phi=1.0, z_func=None, mstar=1.0, dist=100.,
                             resample=1, beam_spacing=False, PA_min=None,
                             PA_max=None, exclude_PA=False, abs_PA=False,
-                            mask_frame='disk',
+                            mask=None, mask_frame='disk',
                             assume_correlated=False, skip_empty_annuli=True):
         """
         Return the integrated spectrum over a given radial range, returning a
@@ -351,17 +351,20 @@ class imagecube(object):
                                          beam_spacing=beam_spacing,
                                          PA_min=PA_min, PA_max=PA_max,
                                          exclude_PA=exclude_PA, abs_PA=abs_PA,
-                                         mask_frame=mask_frame,
+                                         mask=mask, mask_frame=mask_frame,
                                          assume_correlated=assume_correlated,
                                          skip_empty_annuli=skip_empty_annuli)
 
         # Calculate the area of the mask.
-        mask = self.get_mask(r_min=r_min, r_max=r_max, PA_min=PA_min,
-                             PA_max=PA_max, exclude_PA=exclude_PA,
-                             abs_PA=abs_PA, mask_frame=mask_frame, x0=x0,
-                             y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
-                             phi=phi, z_func=z_func)
+        if mask is None:
+            mask = self.get_mask(r_min=r_min, r_max=r_max, PA_min=PA_min,
+                                 PA_max=PA_max, exclude_PA=exclude_PA,
+                                 abs_PA=abs_PA, mask_frame=mask_frame, x0=x0,
+                                 y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
+                                 phi=phi, z_func=z_func)
         nb = np.sum(mask) * self.dpix**2 / self._calculate_beam_area_arcsec()
+
+        # Return
         return x, y * nb, dy * nb
 
     def radial_spectra(self, rvals=None, rbins=None, dr=None, x0=0.0,
@@ -509,7 +512,8 @@ class imagecube(object):
             - ``'mJy'``
             - ``'Jy'``
 
-        while for the velocity we have:
+        where ``'/beam'`` is equivalent to ``'/pix'`` if not beam information
+        is found in the FITS header. For the velocity we have:
 
             - ``'m/s'``
             - ``'km/s'``
@@ -588,6 +592,7 @@ class imagecube(object):
             Arrays of the bin centers in [arcsec], the profile value in the
             requested units and the associated uncertainties.
         """
+
         # If shifting not available, change function.
         if self.data.ndim == 2:
             return self._radial_profile_2D(rvals=rvals, rbins=rbins, dr=dr,
@@ -600,11 +605,8 @@ class imagecube(object):
                                            mask_frame=mask_frame,
                                            assume_correlated=assume_correlated)
 
-        # Parse the function variables.
-        _flux_unit, _velo_unit = imagecube._parse_unit(unit)
-        chans = self._parse_channel(velo_range)
-
         # Grab the spectra.
+        _flux_unit, _velo_unit = imagecube._parse_unit(unit)
         out = self.radial_spectra(rvals=rvals, rbins=rbins, dr=dr,
                                   x0=x0, y0=y0, inc=inc, PA=PA, z0=z0, psi=psi,
                                   z1=z1, phi=phi, z_func=z_func, mstar=mstar,
@@ -620,6 +622,7 @@ class imagecube(object):
         # Collapse the spectra to a radial profile.
         if _velo_unit is not None:
             scale = 1e0 if _velo_unit == 'm/s' else 1e-3
+            chans = self._parse_channel(velo_range)
             profile = np.array([np.trapz(s[1][chans[0]:chans[1]+1],
                                          s[0][chans[0]:chans[1]+1] * scale)
                                 for s in spectra])
@@ -646,6 +649,8 @@ class imagecube(object):
         for u in unit:
             if isinstance(u, int):
                 _units += [u]
+            elif isinstance(u, float):
+                _units += [abs(self.velax - u).argmin()]
             elif isinstance(u, str):
                 u = u.lower()
                 if 'km/s' in u:
@@ -663,8 +668,10 @@ class imagecube(object):
         """Return the flux and velocity units for integrating spectra."""
         try:
             flux, velo = unit.split(' ')
+            velo = velo.lower()
         except ValueError:
             flux, velo = unit, None
+        flux = flux.lower().replace('/pix', '/beam')
         if flux.lower() not in ['mjy', 'jy', 'mk', 'k', 'mjy/beam', 'jy/beam']:
             raise ValueError("Unknown flux unit: {}.".format(flux))
         if velo is not None and velo.lower() not in ['m/s', 'km/s']:
@@ -672,6 +679,23 @@ class imagecube(object):
         if velo is not None:
             velo = velo.lower()
         return flux.lower(), velo
+
+    def _test_bunit(self):
+        """Test to make sure the attached BUNIT value is valid."""
+        try:
+            bunit, vunit = self.bunit.lower().split(' ')
+        except:
+            bunit, vunit = self.bunit.lower(), ''
+        bunit = bunit.replace('/pix', '/beam')
+        if bunit not in ['jy/beam', 'mjy/beam', 'k', 'mk', 'm/s', 'km/s']:
+            raise ValueError("Unknown 'BUNIT' value " +
+                             "{}. ".format(self.header['bunit']) +
+                             "Please provide `bunit`.")
+        if vunit not in ['', 'km/s', 'm/s']:
+            raise ValueError("Unknown 'BUNIT' value " +
+                             "{}. ".format(self.header['bunit']) +
+                             "Please provide `bunit`.")
+        return bunit, vunit
 
     def _test_2D(self):
         """Check to see if the cube is 3D and can use shifting functions."""
@@ -733,6 +757,8 @@ class imagecube(object):
         rpnts = rpnts[mask]
         toavg = self.data.flatten()[mask]
         ridxs = np.digitize(rpnts, rbins)
+
+        # Averaging.
         if percentiles:
             rstat = np.array([np.percentile(toavg[ridxs == r], [16, 50, 84])
                               for r in range(1, rbins.size)]).T
@@ -776,9 +802,6 @@ class imagecube(object):
             The shifted data cube.
         """
 
-        if save:
-            raise NotImplementedError("Coming soon!")
-
         # Radial positions.
         rvals, tvals, _ = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA,
                                            z0=z0, psi=psi, z1=z1, phi=phi)
@@ -803,6 +826,13 @@ class imagecube(object):
                                                 self.data[:, y, x],
                                                 bounds_error=False)(self.velax)
         assert shifted.shape == self.data.shape, "Wrong shape of shifted cube."
+
+        if save:
+            if isinstance(save, str):
+                output = save
+            else:
+                output = self.path.replace('.fits', '_shifted.fits')
+            fits.writeto(output, shifted, self.header)
         return shifted
 
     def find_center(self, dx=None, dy=None, Nx=None, Ny=None, mask=None,
@@ -1530,6 +1560,7 @@ class imagecube(object):
         self.header = fits.getheader(path)
         self.data = np.squeeze(fits.getdata(self.path))
         self.data = np.where(np.isfinite(self.data), self.data, 0.0)
+        self.bunit = self.header['bunit']
 
         # Position axes.
         self.xaxis = self._readpositionaxis(a=1)
@@ -1574,7 +1605,7 @@ class imagecube(object):
             self.beamarea_arcsec = self._calculate_beam_area_arcsec()
             self.beamarea_str = self._calculate_beam_area_str()
         except Exception:
-            print("WARNING: No beam values found. Assuming Jy/pix scale.")
+            print("WARNING: No beam values found. Assuming Jy/pix units.")
             self.bmaj = self.dpix
             self.bmin = self.dpix
             self.bpa = 0.0
