@@ -1405,7 +1405,8 @@ class imagecube(object):
     # -- Deprojection Functions -- #
 
     def disk_coords(self, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=0.0,
-                    z1=0.0, phi=0.0, z_func=None, frame='cylindrical'):
+                    z1=0.0, phi=0.0, z_func=None, frame='cylindrical',
+                    shadowed=True, griddata_kw=None):
         r"""
         Get the disk coordinates given certain geometrical parameters and an
         emission surface. The emission surface is parameterized as a powerlaw
@@ -1474,7 +1475,14 @@ class imagecube(object):
                 return np.clip(z, a_min=None, a_max=0.0)
 
         # Calculate the pixel values.
-        r, t, z = self._get_flared_coords(x0, y0, inc, PA, z_func)
+        if shadowed:
+            griddata_kw = {} if griddata_kw is None else griddata_kw
+            r, t, z = self._get_shadowed_coords(x0, y0, inc, PA, z_func,
+                                                **griddata_kw)
+        else:
+            r, t, z = self._get_flared_coords(x0, y0, inc, PA, z_func)
+
+        # Transform coordinate system.
         if frame == 'cylindrical':
             return r, t, z
         return r * np.cos(t), r * np.sin(t), z
@@ -1520,6 +1528,80 @@ class imagecube(object):
             r_tmp = np.hypot(y_tmp, x_mid)
             t_tmp = np.arctan2(y_tmp, x_mid)
         return r_tmp, t_tmp, z_func(r_tmp)
+
+    def _get_shadowed_coords(self, x0, y0, inc, PA, z_func, extend=2.0,
+                             oversample=2.0, griddata_kw=None):
+        """
+        Return cyclindrical coords of surface in [arcsec, rad, arcsec] but
+        using a slightly slower method that deals better with large gradients
+        in the emission surface.
+
+        Args:
+            x0 (Optional[float]): Source right ascension offset [arcsec].
+            y0 (Optional[float]): Source declination offset [arcsec].
+            inc (Optional[float]): Source inclination [deg].
+            PA (Optional[float]): Source position angle [deg]. Measured
+                between north and the red-shifted semi-major axis in an
+                easterly direction.
+            z_func (Optional[function]): A function which provides
+                :math:`z(r)`. Note that no checking will occur to make sure
+                this is a valid function.
+            extend (Optional[float]): When calculating the disk-frame
+                coordinates, extend the axes by this amount. A larger area is
+                necessary as for large inclinations as the projected distance
+                along the minor axis will be compressed.
+            oversample (Optional[float]): Oversample the axes by this factor. A
+                larger value will give a more precise deprojection at the cost
+                of computation time.
+            griddata_kw (Optional[dict]): Any kwargs to be passed to
+                ``griddata`` which performs the interpolation.
+
+        Returns:
+            Three coordinate arrays, either the cylindrical coordaintes,
+            ``(r, theta, z)`` or cartestian coordinates, ``(x, y, z)``,
+            depending on ``frame``.
+        """
+
+        # Make the disk-frame coordinates.
+        diskframe_coords = self._get_diskframe_coords(extend, oversample)
+        xdisk, ydisk, rdisk, tdisk = diskframe_coords
+        zdisk = z_func(rdisk)
+
+        # Incline the disk.
+        inc = np.radians(inc)
+        x_dep = xdisk
+        y_dep = ydisk * np.cos(inc) - zdisk * np.sin(inc)
+
+        # Remove shadowed pixels.
+        if inc < 0.0:
+            y_dep = np.maximum.accumulate(y_dep, axis=0)
+        else:
+            y_dep = np.minimum.accumulate(y_dep[::-1], axis=0)[::-1]
+
+        # Rotate and the disk.
+        x_rot, y_rot = imagecube._rotate_coords(x_dep, y_dep, PA)
+        x_rot, y_rot = x_rot + x0, y_rot + y0
+
+        # Grid the disk.
+        from scipy.interpolate import griddata
+        disk = (x_rot.flatten(), y_rot.flatten())
+        grid = (self.xaxis[None, :], self.yaxis[:, None])
+        griddata_kw = {} if griddata_kw is None else griddata_kw
+        griddata_kw['method'] = griddata_kw.get('method', 'nearest')
+        r_obs = griddata(disk, rdisk.flatten(), grid, **griddata_kw)
+        t_obs = griddata(disk, tdisk.flatten(), grid, **griddata_kw)
+        return r_obs, t_obs, z_func(r_obs)
+
+    def _get_diskframe_coords(self, extend=2.0, oversample=0.5):
+        """Disk-frame coordinates based on the cube axes."""
+        x_disk = np.linspace(extend * self.xaxis[0], extend * self.xaxis[-1],
+                             int(self.nxpix * oversample))[::-1]
+        y_disk = np.linspace(extend * self.yaxis[0], extend * self.yaxis[-1],
+                             int(self.nypix * oversample))
+        x_disk, y_disk = np.meshgrid(x_disk, y_disk)
+        r_disk = np.hypot(x_disk, y_disk)
+        t_disk = np.arctan2(y_disk, x_disk)
+        return x_disk, y_disk, r_disk, t_disk
 
     # -- Spectral Axis Manipulation -- #
 
