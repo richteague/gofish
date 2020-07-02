@@ -58,7 +58,8 @@ class imagecube(object):
                          psi=1.0, z1=0.0, phi=1.0, z_func=None, mstar=1.0,
                          dist=100., resample=1, beam_spacing=False,
                          mask_frame='disk', unit='Jy/beam', mask=None,
-                         assume_correlated=True, skip_empty_annuli=True):
+                         assume_correlated=True, skip_empty_annuli=True,
+                         shadowed=True):
         """
         Return the averaged spectrum over a given radial range, returning a
         spectrum in units of [Jy/beam] or [K] using the Rayleigh-Jeans
@@ -170,7 +171,8 @@ class imagecube(object):
 
         # Keplerian velocity at the annulus centers.
         v_kep = self._keplerian(rpnts=rvals, mstar=mstar, dist=dist, inc=inc,
-                                z0=z0, psi=psi, z1=z1, phi=phi)
+                                z0=z0, psi=psi, z1=z1, phi=phi,
+                                shadowed=shadowed)
         v_kep = np.atleast_1d(v_kep)
 
         # Output unit.
@@ -199,7 +201,8 @@ class imagecube(object):
                                            PA_min=PA_min, PA_max=PA_max,
                                            exclude_PA=exclude_PA,
                                            abs_PA=abs_PA,
-                                           mask_frame=mask_frame)
+                                           mask_frame=mask_frame,
+                                           shadowed=shadowed)
                 x, y, dy = annulus.deprojected_spectrum(vrot=v_kep[ridx],
                                                         resample=resample,
                                                         scatter=True)
@@ -257,7 +260,8 @@ class imagecube(object):
                             resample=1, beam_spacing=False, PA_min=None,
                             PA_max=None, exclude_PA=False, abs_PA=False,
                             mask=None, mask_frame='disk',
-                            assume_correlated=False, skip_empty_annuli=True):
+                            assume_correlated=False, skip_empty_annuli=True,
+                            shadowed=True):
         """
         Return the integrated spectrum over a given radial range, returning a
         spectrum in units of [Jy].
@@ -353,7 +357,8 @@ class imagecube(object):
                                          exclude_PA=exclude_PA, abs_PA=abs_PA,
                                          mask=mask, mask_frame=mask_frame,
                                          assume_correlated=assume_correlated,
-                                         skip_empty_annuli=skip_empty_annuli)
+                                         skip_empty_annuli=skip_empty_annuli,
+                                         shadowed=shadowed)
 
         # Calculate the area of the mask.
         if mask is None:
@@ -361,7 +366,7 @@ class imagecube(object):
                                  PA_max=PA_max, exclude_PA=exclude_PA,
                                  abs_PA=abs_PA, mask_frame=mask_frame, x0=x0,
                                  y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
-                                 phi=phi, z_func=z_func)
+                                 phi=phi, z_func=z_func, shadowed=shadowed)
         nb = np.sum(mask) * self.dpix**2 / self._calculate_beam_area_arcsec()
 
         # Return
@@ -373,7 +378,7 @@ class imagecube(object):
                        beam_spacing=False, r_min=None, r_max=None,
                        PA_min=None, PA_max=None, exclude_PA=None, abs_PA=False,
                        mask_frame='disk', mask=None, assume_correlated=True,
-                       unit='Jy/beam'):
+                       unit='Jy/beam', shadowed=shadowed):
         """
         Return shifted and stacked spectra, either integrated flux or average
         spectrum, along the provided radial profile. Possible units for the
@@ -479,7 +484,7 @@ class imagecube(object):
                                  PA_max=PA_max, exclude_PA=exclude_PA,
                                  abs_PA=abs_PA, mask_frame=mask_frame,
                                  assume_correlated=assume_correlated,
-                                 mask=mask)]
+                                 mask=mask, shadowed=shadowed)]
             else:
                 func = self.average_spectrum
                 spectra += [func(r_min=r_min, r_max=r_max, dr=dr, x0=x0, y0=y0,
@@ -490,7 +495,8 @@ class imagecube(object):
                                  PA_max=PA_max, exclude_PA=exclude_PA,
                                  abs_PA=abs_PA, mask=mask,
                                  assume_correlated=assume_correlated,
-                                 mask_frame=mask_frame, unit=unit)]
+                                 mask_frame=mask_frame, unit=unit,
+                                 shadowed=shadowed)]
         return rvals, np.squeeze(spectra)
 
     def radial_profile(self, rvals=None, rbins=None, dr=None,
@@ -499,7 +505,7 @@ class imagecube(object):
                        mstar=1.0, dist=100., resample=1, beam_spacing=False,
                        r_min=None, r_max=None, PA_min=None, PA_max=None,
                        exclude_PA=False, abs_PA=False, mask_frame='disk',
-                       velo_range=None, assume_correlated=True):
+                       velo_range=None, assume_correlated=True, shadowed=True):
         """
         Generate a radial profile from shifted and stacked spectra. There are
         different ways to collapse the spectrum into a single value using the
@@ -603,7 +609,8 @@ class imagecube(object):
                                            PA_max=PA_max, abs_PA=abs_PA,
                                            exclude_PA=exclude_PA,
                                            mask_frame=mask_frame,
-                                           assume_correlated=assume_correlated)
+                                           assume_correlated=assume_correlated,
+                                           shadowed=shadowed)
 
         # Grab the spectra.
         _flux_unit, _velo_unit = imagecube._parse_unit(unit)
@@ -616,7 +623,7 @@ class imagecube(object):
                                   exclude_PA=exclude_PA, abs_PA=abs_PA,
                                   mask_frame=mask_frame,
                                   assume_correlated=assume_correlated,
-                                  unit=_flux_unit)
+                                  unit=_flux_unit, shadowed=shadowed)
         rvals, spectra = out
 
         # Collapse the spectra to a radial profile.
@@ -707,7 +714,8 @@ class imagecube(object):
                            phi=1.0, z_func=None, r_min=None, r_max=None,
                            PA_min=None, PA_max=None, exclude_PA=False,
                            abs_PA=False, mask_frame='disk',
-                           assume_correlated=False, percentiles=False):
+                           assume_correlated=False, percentiles=False,
+                           shadowed=True):
         """
         Returns the radial profile if `self.data.ndim == 2`, i.e., if shifting
         cannot be performed. Uses all the same parameters, but does not do any
@@ -735,14 +743,15 @@ class imagecube(object):
                              PA_max=PA_max, exclude_PA=exclude_PA,
                              abs_PA=abs_PA, mask_frame=mask_frame, x0=x0,
                              y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
-                             phi=phi, z_func=z_func)
+                             phi=phi, z_func=z_func, shadowed=shadowed)
         if mask.shape != self.data.shape:
             raise ValueError("Mismatch in mask and data shape.")
         mask = mask.flatten()
 
         # Deprojection of the disk coordinates.
         rpnts = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA, z0=z0, psi=psi,
-                                 z1=z1, phi=phi, z_func=z_func)[0]
+                                 z1=z1, phi=phi, z_func=z_func,
+                                 shadowed=shadowed)[0]
         if rpnts.shape != self.data.shape:
             raise ValueError("Mismatch in rvals and data shape.")
         rpnts = rpnts.flatten()
@@ -776,7 +785,7 @@ class imagecube(object):
 
     def shifted_cube(self, inc, PA, mstar, dist, x0=0.0, y0=0.0, z0=0.0,
                      psi=1.0, z1=0.0, phi=1.0, r_min=None, r_max=None,
-                     fill_val=np.nan,  save=False):
+                     fill_val=np.nan, save=False, shadowed=True):
         """
         Apply the velocity shift to each pixel and return the cube, or save as
         as new FITS file. This would be useful if you want to create moment
@@ -804,7 +813,8 @@ class imagecube(object):
 
         # Radial positions.
         rvals, tvals, _ = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA,
-                                           z0=z0, psi=psi, z1=z1, phi=phi)
+                                           z0=z0, psi=psi, z1=z1, phi=phi,
+                                           shadowed=shadowed)
         r_min = 0.0 if r_min is None else r_min
         r_max = rvals.max() if r_max is None else r_max
         mask = np.logical_and(rvals >= r_min, rvals <= r_max)
@@ -976,7 +986,7 @@ class imagecube(object):
                  x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
                  phi=1.0, z_func=None, mstar=None, dist=None, mask=None,
                  mask_frame='disk', beam_spacing=True, annulus_kwargs=None,
-                 get_vlos_kwargs=None):
+                 get_vlos_kwargs=None, shadowed=True):
         """
         Infer the rotational and radial velocity profiles from the data
         following the approach described in `Teague et al. (2018)`_. The cube
@@ -1068,7 +1078,8 @@ class imagecube(object):
                                        exclude_PA=exclude_PA, abs_PA=abs_PA,
                                        x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
                                        psi=psi, z1=z1, phi=phi, z_func=z_func,
-                                       mask=mask, beam_spacing=beam_spacing)
+                                       mask=mask, beam_spacing=beam_spacing,
+                                       shadowed=shadowed)
 
             # Starting positions if a velocity profile is given.
             if mstar is not None:
@@ -1091,7 +1102,7 @@ class imagecube(object):
                     exclude_PA=False, abs_PA=False, x0=0.0, y0=0.0, inc=0.0,
                     PA=0.0, z0=0.0, psi=1.0, z1=0.0, phi=1.0, z_func=None,
                     mask=None, mask_frame='disk', beam_spacing=True,
-                    annulus_kwargs=None):
+                    annulus_kwargs=None, shadowed=True):
         """
         Return an annulus (or section of), of spectra and their polar angles.
         Can select spatially independent pixels within the annulus, however as
@@ -1151,7 +1162,8 @@ class imagecube(object):
                                  PA_min=PA_min, PA_max=PA_max,
                                  exclude_PA=exclude_PA, abs_PA=abs_PA, x0=x0,
                                  y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
-                                 phi=phi, z_func=z_func, mask_frame=mask_frame)
+                                 phi=phi, z_func=z_func, mask_frame=mask_frame,
+                                 shadowed=shadowed)
         if mask.shape != self.data[0].shape:
             raise ValueError("`mask` is incorrect shape.")
         mask = mask.flatten()
@@ -1160,7 +1172,7 @@ class imagecube(object):
         dvals = self.data.copy().reshape(self.data.shape[0], -1)
         rvals, tvals = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
                                         psi=psi, z1=z1, phi=phi,
-                                        z_func=z_func)[:2]
+                                        z_func=z_func, shadowed=shadowed)[:2]
         rvals, tvals = rvals.flatten(), tvals.flatten()
         dvals, rvals, tvals = dvals[:, mask].T, rvals[mask], tvals[mask]
 
@@ -1193,7 +1205,7 @@ class imagecube(object):
     def get_mask(self, r_min=None, r_max=None, exclude_r=False, PA_min=None,
                  PA_max=None, exclude_PA=False, abs_PA=False,
                  mask_frame='disk', x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
-                 psi=1.0, z1=0.0, phi=1.0, z_func=None):
+                 psi=1.0, z1=0.0, phi=1.0, z_func=None, shadowed=True):
         """
         Returns a 2D mask for pixels in the given region. The mask can be
         specified in either disk-centric coordinates, ``mask_frame='disk'``,
@@ -1255,7 +1267,8 @@ class imagecube(object):
         # Calculate pixel coordaintes.
         rvals, tvals = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
                                         psi=psi, z1=z1, phi=phi, z_func=z_func,
-                                        frame='cylindrical')[:2]
+                                        frame='cylindrical',
+                                        shadowed=shadowed)[:2]
         tvals = abs(tvals) if abs_PA else tvals
 
         # Radial mask.
@@ -1316,7 +1329,8 @@ class imagecube(object):
                             psi=0.0, z1=0.0, phi=0.0, z_func=None, r_min=None,
                             r_max=None, PA_min=None, PA_max=None,
                             exclude_PA=False, abs_PA=False, mask_frame='disk',
-                            interp1d_kw=None, background_only=False):
+                            interp1d_kw=None, background_only=False,
+                            shadowed=True):
         """
         Return the residual from an azimuthally avearged background. This is
         most appropriate for exploring azimuthally asymmetric emission in
@@ -1387,7 +1401,7 @@ class imagecube(object):
                                       z_func=z_func, r_min=r_min, r_max=r_max,
                                       PA_min=PA_min, PA_max=PA_max,
                                       exclude_PA=exclude_PA, abs_PA=abs_PA,
-                                      mask_frame=mask_frame)
+                                      mask_frame=mask_frame, shadowed=shadowed)
 
         # Build the interpolation function.
         from scipy.interpolate import interp1d
@@ -1399,14 +1413,15 @@ class imagecube(object):
         # Return the residual (or background if requested).
         background = avg(self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA,
                                           z0=z0, phi=phi, z1=z1, psi=psi,
-                                          z_func=z_func)[0])
+                                          z_func=z_func, shadowed=shadowed)[0])
         return background if background_only else self.data - background
 
     # -- Deprojection Functions -- #
 
     def disk_coords(self, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=0.0,
                     z1=0.0, phi=0.0, z_func=None, frame='cylindrical',
-                    shadowed=True, griddata_kw=None):
+                    shadowed=True, extend=2.0, oversample=2.0,
+                    griddata_kw=None):
         r"""
         Get the disk coordinates given certain geometrical parameters and an
         emission surface. The emission surface is parameterized as a powerlaw
@@ -1478,6 +1493,7 @@ class imagecube(object):
         if shadowed:
             griddata_kw = {} if griddata_kw is None else griddata_kw
             r, t, z = self._get_shadowed_coords(x0, y0, inc, PA, z_func,
+                                                extend, oversample,
                                                 **griddata_kw)
         else:
             r, t, z = self._get_flared_coords(x0, y0, inc, PA, z_func)
@@ -1977,7 +1993,7 @@ class imagecube(object):
 
     def disk_to_sky(self, coords, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
                     psi=1.0, z1=0.0, phi=0.0, z_func=None, return_idx=False,
-                    frame_in='cylindrical'):
+                    frame_in='cylindrical', shadowed=True):
         """
         For a given disk midplane coordinate, either (r, theta) or (x, y),
         return interpolated sky coordiantes in (x, y) for plotting. The input
@@ -2037,7 +2053,8 @@ class imagecube(object):
         xdisk_grid, ydisk_grid = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA,
                                                   z0=z0, psi=psi, z1=z1,
                                                   phi=phi, z_func=z_func,
-                                                  frame='cartesian')[:2]
+                                                  frame='cartesian',
+                                                  shadowed=shadowed)[:2]
         xdisk_grid, ydisk_grid = xdisk_grid.flatten(), ydisk_grid.flatten()
         xsky_grid, ysky_grid = self._get_cart_sky_coords(x0=x0, y0=y0)
         xsky_grid, ysky_grid = xsky_grid.flatten(), ysky_grid.flatten()
@@ -2108,7 +2125,8 @@ class imagecube(object):
                       z1=0.0, phi=0.0, z_func=None, resample=1,
                       beam_spacing=False, r_min=None, r_max=None,
                       PA_min=None, PA_max=None, exclude_PA=False, abs_PA=False,
-                      mask_frame='disk', unit='Jy/beam', imshow_kwargs=None):
+                      mask_frame='disk', unit='Jy/beam', imshow_kwargs=None,
+                      shadowed=True):
         """
         Make a `teardrop` plot. For argument descriptions see
         ``radial_spectra``. For all properties related to ``imshow``, include
@@ -2129,7 +2147,8 @@ class imagecube(object):
                                   beam_spacing=beam_spacing, r_min=r_min,
                                   r_max=r_max, PA_min=PA_min, PA_max=PA_max,
                                   exclude_PA=exclude_PA, abs_PA=abs_PA,
-                                  mask_frame=mask_frame, unit=unit)
+                                  mask_frame=mask_frame, unit=unit,
+                                  shadowed=shadowed)
         rvals, spectra = out
         velax = spectra[0, 0]
 
@@ -2175,7 +2194,7 @@ class imagecube(object):
                   mask_frame='disk', mask=None, x0=0.0, y0=0.0, inc=0.0,
                   PA=0.0, z0=0.0, psi=1.0, z1=0.0, phi=1.0, z_func=None,
                   mask_color='k', mask_alpha=0.5, contour_kwargs=None,
-                  contourf_kwargs=None):
+                  contourf_kwargs=None, shadowed=True):
         """
         Plot the boolean mask on the provided axis to check that it makes
         sense.
@@ -2232,7 +2251,7 @@ class imagecube(object):
                                  exclude_PA=exclude_PA, abs_PA=abs_PA,
                                  mask_frame=mask_frame, x0=x0, y0=y0, inc=inc,
                                  PA=PA, z0=z0, psi=psi, z1=z1, phi=phi,
-                                 z_func=z_func)
+                                 z_func=z_func, shadowed=shadowed)
         assert mask.shape[0] == self.yaxis.size, "Wrong y-axis shape for mask."
         assert mask.shape[1] == self.xaxis.size, "Wrong x-axis shape for mask."
 
