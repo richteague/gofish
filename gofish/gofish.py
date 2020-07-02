@@ -378,7 +378,7 @@ class imagecube(object):
                        beam_spacing=False, r_min=None, r_max=None,
                        PA_min=None, PA_max=None, exclude_PA=None, abs_PA=False,
                        mask_frame='disk', mask=None, assume_correlated=True,
-                       unit='Jy/beam', shadowed=shadowed):
+                       unit='Jy/beam', shadowed=True):
         """
         Return shifted and stacked spectra, either integrated flux or average
         spectrum, along the provided radial profile. Possible units for the
