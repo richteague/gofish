@@ -171,8 +171,7 @@ class imagecube(object):
 
         # Keplerian velocity at the annulus centers.
         v_kep = self._keplerian(rpnts=rvals, mstar=mstar, dist=dist, inc=inc,
-                                z0=z0, psi=psi, z1=z1, phi=phi,
-                                shadowed=shadowed)
+                                z0=z0, psi=psi, z1=z1, phi=phi, z_func=z_func)
         v_kep = np.atleast_1d(v_kep)
 
         # Output unit.
@@ -784,8 +783,8 @@ class imagecube(object):
         return rvals, ravgs, rstds
 
     def shifted_cube(self, inc, PA, mstar, dist, x0=0.0, y0=0.0, z0=0.0,
-                     psi=1.0, z1=0.0, phi=1.0, r_min=None, r_max=None,
-                     fill_val=np.nan, save=False, shadowed=True):
+                     psi=1.0, z1=0.0, phi=1.0, z_func=None, r_min=None,
+                     r_max=None, fill_val=np.nan, save=False, shadowed=True):
         """
         Apply the velocity shift to each pixel and return the cube, or save as
         as new FITS file. This would be useful if you want to create moment
@@ -814,14 +813,14 @@ class imagecube(object):
         # Radial positions.
         rvals, tvals, _ = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA,
                                            z0=z0, psi=psi, z1=z1, phi=phi,
-                                           shadowed=shadowed)
+                                           z_func=z_func, shadowed=shadowed)
         r_min = 0.0 if r_min is None else r_min
         r_max = rvals.max() if r_max is None else r_max
         mask = np.logical_and(rvals >= r_min, rvals <= r_max)
 
         # Projected velocity.
         vkep = self._keplerian(rpnts=rvals, mstar=mstar, dist=dist, inc=inc,
-                               z0=z0, psi=psi, z1=z1, phi=phi)
+                               z0=z0, psi=psi, z1=z1, phi=phi, z_func=z_func)
         vkep *= np.cos(tvals)
         if vkep.shape != mask.shape:
             raise ValueError("Velocity map incorrect shape.")
