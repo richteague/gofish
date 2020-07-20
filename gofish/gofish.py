@@ -50,6 +50,8 @@ class imagecube(object):
         if self.data.ndim != 3 and self.verbose:
             print("WARNING: Provided cube is only 2D. Shifting not available.")
 
+        self._cached_average_spectra={}
+
     # -- Fishing Functions -- #
 
     def average_spectrum(self, r_min=None, r_max=None, dr=None,
@@ -154,6 +156,20 @@ class imagecube(object):
             bin, ``scatter``. The latter two are in units of either [Jy/beam]
             or [K] depending on the ``unit``.
         """
+        # Check whether this tuple of inputs was already calculated
+        args = (r_min, r_max, dr,
+                PA_min, PA_max, exclude_PA,
+                abs_PA, x0, y0, inc, PA, z0,
+                psi, z1, phi, z_func, mstar,
+                dist, resample, beam_spacing,
+                mask_frame, unit.lower(), mask,
+                assume_correlated, skip_empty_annuli,
+                shadowed)
+        print(args)
+        if args in self._cached_average_spectra.keys():
+            print("Using cached!")
+            return self._cached_average_spectra[args]
+
         # Check is cube is 2D.
         self._test_2D()
 
@@ -251,6 +267,7 @@ class imagecube(object):
         if unit[0] == 'm':
             spectrum *= 1e3
             scatter *= 1e3
+        self._cached_average_spectra[args] = x, spectrum, scatter
         return x, spectrum, scatter
 
     def integrated_spectrum(self, r_min=None, r_max=None, dr=None, x0=0.0,
@@ -503,7 +520,7 @@ class imagecube(object):
                        z0=0.0, psi=1.0, z1=0.0, phi=1.0, z_func=None,
                        mstar=1.0, dist=100., resample=1, beam_spacing=False,
                        r_min=None, r_max=None, PA_min=None, PA_max=None,
-                       exclude_PA=False, abs_PA=False, mask_frame='disk',
+                       exclude_PA=None, abs_PA=False, mask_frame='disk',
                        velo_range=None, assume_correlated=True, shadowed=True):
         """
         Generate a radial profile from shifted and stacked spectra. There are
