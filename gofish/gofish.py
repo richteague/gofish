@@ -139,6 +139,9 @@ class imagecube(object):
                 or ``'K'``. Note that the conversion to Kelvin assumes the
                 Rayleigh-Jeans approximation which is typically invalid at
                 sub-mm wavelengths.
+            mask (Optional[ndarray]): Either a 2D or 3D mask to use when
+                averaging the spectra. This will be used in addition to any
+                geometrically defined mask.
             assume_correlated (Optional[bool]): Whether to treat the spectra
                 which are stacked as correlated, by default this is
                 ``True``. If ``False``, the uncertainty will be estimated using
@@ -180,10 +183,17 @@ class imagecube(object):
             raise ValueError("Unknown `unit`.")
         if resample < 1.0 and self.verbose:
             print('WARNING: `resample < 1`, are you sure you want channels '
-                  + 'more narrow than 1 m/s?')
+                  + 'narrower than 1 m/s?')
 
         # Pseduo masking. Make everything masked a NaN and then revert.
         if mask is not None:
+
+            # Extend the mask along the velocity axis.
+            if mask.shape != self.data.shape:
+                if mask.shape != self.data.shape[1:]:
+                    raise ValueError("Unknown mask shape.")
+                mask = np.ones(self.data.shape) * mask[None, :, :]
+
             saved_data = self.data.copy()
             self.data = np.where(mask, self.data, np.nan)
 
@@ -191,6 +201,7 @@ class imagecube(object):
         # Have an array to describe whether an annulus is included in the
         # average or not.
         spectra, scatter, included = [], [], np.ones(rvals.size).astype('int')
+
         for ridx in range(rvals.size):
             try:
                 annulus = self.get_annulus(rbins[ridx], rbins[ridx+1],
@@ -202,9 +213,11 @@ class imagecube(object):
                                            abs_PA=abs_PA,
                                            mask_frame=mask_frame,
                                            shadowed=shadowed)
+
                 x, y, dy = annulus.deprojected_spectrum(vrot=v_kep[ridx],
                                                         resample=resample,
                                                         scatter=True)
+
                 spectra += [y]
                 scatter += [dy]
             except ValueError:
@@ -325,6 +338,9 @@ class imagecube(object):
                 ``PA_min <= PA_pix <= PA_max``.
             abs_PA (Optional[bool]): If ``True``, take the absolute value of
                 the polar angle such that it runs from 0 [deg] to 180 [deg].
+            mask (Optional[ndarray]): Either a 2D or 3D mask to use when
+                averaging the spectra. This will be used in addition to any
+                geometrically defined mask.
             mask_frame (Optional[str]): Which frame the radial and azimuthal
                 mask is specified in, either ``'disk'`` or ``'sky'``.
             assume_correlated (Optional[bool]): Whether to treat the spectra
@@ -782,9 +798,10 @@ class imagecube(object):
 
         return rvals, ravgs, rstds
 
-    def shifted_cube(self, inc, PA, mstar, dist, x0=0.0, y0=0.0, z0=0.0,
-                     psi=1.0, z1=0.0, phi=1.0, z_func=None, r_min=None,
-                     r_max=None, fill_val=np.nan, save=False, shadowed=True):
+    def shifted_cube(self, inc, PA, x0=0.0, y0=0.0, z0=0.0, psi=1.0, z1=0.0,
+                     phi=1.0, z_func=None, mstar=None, dist=None, v0=None,
+                     r_min=None, r_max=None, fill_val=np.nan, save=False,
+                     shadowed=True):
         """
         Apply the velocity shift to each pixel and return the cube, or save as
         as new FITS file. This would be useful if you want to create moment
@@ -795,14 +812,22 @@ class imagecube(object):
             inc (float): Inclination of the disk in [degrees].
             PA (float): Position angle of the disk in [degrees],
                 measured east-of-north towards the redshifted major axis.
-            mstar (Optional[float]): Stellar mass in [Msun].
-            dist (Optional[float]): Distance to the source in [pc].
+            x0 (Optional[float]): Source center offset along the x-axis in
+                [arcsec].
+            y0 (Optional[float]): Source center offset along the y-axis in
+                [arcsec].
             z0 (Optional[float]): Emission height in [arcsec] at a radius of
                 1".
             psi (Optional[float]): Flaring angle of the emission surface.
             z1 (Optional[float]): Correction to emission height at 1" in
                 [arcsec].
             phi (Optional[float]): Flaring angle correction term.
+            z_func (Optional[callable]): A function which returns the emission
+                height in [arcsec] for a radius given in [arcsec].
+            mstar (Optional[float]): Stellar mass in [Msun].
+            dist (Optional[float]): Distance to the source in [pc].
+            v0 (Optional[callable]): A function which returns the projected
+                line of sight velocity in [m/s] for a radius given in [m/s].
             r_min (Optional[float]): The inner radius in [arcsec] to shift.
             r_max (Optional[float]): The outer radius in [arcsec] to shift.
 
@@ -819,10 +844,20 @@ class imagecube(object):
         mask = np.logical_and(rvals >= r_min, rvals <= r_max)
 
         # Projected velocity.
-        vkep = self._keplerian(rpnts=rvals, mstar=mstar, dist=dist, inc=inc,
-                               z0=z0, psi=psi, z1=z1, phi=phi, z_func=z_func)
-        vkep *= np.cos(tvals)
-        if vkep.shape != mask.shape:
+        if (mstar is not None) and (v0 is not None):
+            raise ValueError("Only specify `mstar` and `dist` or `v0`.")
+        if mstar is not None:
+            if dist is None:
+                raise ValueError("Must specify `dist` with `mstar`.")
+            vmod = self._keplerian(rpnts=rvals, mstar=mstar, dist=dist,
+                                   inc=inc, z0=z0, psi=psi, z1=z1, phi=phi,
+                                   z_func=z_func)
+            vmod *= np.cos(tvals)
+        elif v0 is not None:
+            vmod = v0(rvals)
+        else:
+            raise ValueError("Must specify either `mstar` and `dist` or `v0`.")
+        if vmod.shape != mask.shape:
             raise ValueError("Velocity map incorrect shape.")
 
         # Shift each pixel.
@@ -831,7 +866,7 @@ class imagecube(object):
         for y in range(self.nypix):
             for x in range(self.nxpix):
                 if mask[y, x]:
-                    shifted[:, y, x] = interp1d(self.velax - vkep[y, x],
+                    shifted[:, y, x] = interp1d(self.velax - vmod[y, x],
                                                 self.data[:, y, x],
                                                 bounds_error=False)(self.velax)
         assert shifted.shape == self.data.shape, "Wrong shape of shifted cube."

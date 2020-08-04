@@ -34,7 +34,7 @@ class annulus(object):
     """
 
     def __init__(self, spectra, theta, velax, remove_empty=True,
-                 sort_spectra=True, suppress_warnings=True):
+                 sort_spectra=True, remove_NaN=True, suppress_warnings=True):
 
         # Suppress warnings.
         if suppress_warnings:
@@ -56,6 +56,12 @@ class annulus(object):
             idxa = np.sum(self.spectra, axis=-1) != 0.0
             idxb = np.std(self.spectra, axis=-1) != 0.0
             idxs = idxa & idxb
+            self.theta = self.theta[idxs]
+            self.spectra = self.spectra[idxs]
+
+        # Remove NaNs from spectrum.
+        if remove_NaN:
+            idxs = np.isfinite(self.spectra[:, 0])
             self.theta = self.theta[idxs]
             self.spectra = self.spectra[idxs]
 
@@ -142,8 +148,6 @@ class annulus(object):
 
         # Run the appropriate methods.
         if fit_method == 'gp':
-            if resample:
-                print("WARNING: Resampling with the GP method is not advised.")
             return self._fitting_GP(p0=p0, fit_vrad=fit_vrad,
                                     nwalkers=nwalkers, nsteps=nsteps,
                                     nburnin=nburnin, scatter=scatter,
@@ -435,7 +439,8 @@ class annulus(object):
 
         # Deproject the data and resample if requested.
         x, y = self.deprojected_spectrum(vrot=vrot, vrad=vrad,
-                                         resample=resample)
+                                         resample=resample,
+                                         scatter=False)
         x, y = self._get_masked_spectrum(x, y)
 
         # Build the GP model and calculate the log-likelihood.
@@ -513,7 +518,7 @@ class annulus(object):
             vrot, vrad = theta
         else:
             vrot, vrad = theta, 0.0
-        x, y = self.deprojected_spectrum(vrot, vrad, resample)
+        x, y = self.deprojected_spectrum(vrot, vrad, resample, scatter=False)
         return annulus._get_gaussian_width(*self._get_masked_spectrum(x, y))
 
     # -- Rotation Velocity by Maximizing SNR -- #
@@ -613,7 +618,7 @@ class annulus(object):
             vrot, vrad = theta
         else:
             vrot, vrad = theta, 0.0
-        x, y = self.deprojected_spectrum(vrot, vrad, resample)
+        x, y = self.deprojected_spectrum(vrot, vrad, resample, scatter=False)
         x0, dx, A = annulus._fit_gaussian(x, y)
         noise = np.std(x[(x - x0) / dx > 3.0])  # Check: noise will vary.
         if signal == 'max':
@@ -843,7 +848,7 @@ class annulus(object):
         Returns:
             x (ndarray): Velocity bin centers.
             y (ndarray): Mean of the bin.
-            dy (ndarray/None): Standard deviation of the bin.
+            dy (ndarray/None): Standard error on the mean of the bin.
         """
         if isinstance(resample, bool):
             if not resample:
@@ -863,14 +868,13 @@ class annulus(object):
                                resample.size + 1)
         else:
             raise TypeError("Resample must be a boolean, int, float or array.")
-        y, x, _ = binned_statistic(vpnts, spnts, statistic=np.nanmean,
-                                   bins=bins)
-        x = np.average([x[1:], x[:-1]], axis=0)
+        y = binned_statistic(vpnts, spnts, statistic=np.nanmean, bins=bins)[0]
+        x = np.average([bins[1:], bins[:-1]], axis=0)
         if not scatter:
             return x, y
-        dy, _, _ = binned_statistic(vpnts, spnts, statistic=np.nanstd,
-                                    bins=bins)
-        return x, y, dy
+        dy = binned_statistic(vpnts, spnts, statistic=np.nanstd, bins=bins)[0]
+        N = binned_statistic(vpnts, spnts, statistic='count', bins=bins)[0]
+        return x, y, dy / N**0.5
 
     def _get_masked_spectrum(self, x, y):
         """Return the masked spectrum for fitting."""
