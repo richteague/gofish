@@ -34,7 +34,7 @@ class annulus(object):
     """
 
     def __init__(self, spectra, theta, velax, remove_empty=True,
-                 sort_spectra=True, remove_NaN=True, suppress_warnings=True):
+                 sort_spectra=True, suppress_warnings=True):
 
         # Suppress warnings.
         if suppress_warnings:
@@ -56,12 +56,6 @@ class annulus(object):
             idxa = np.sum(self.spectra, axis=-1) != 0.0
             idxb = np.std(self.spectra, axis=-1) != 0.0
             idxs = idxa & idxb
-            self.theta = self.theta[idxs]
-            self.spectra = self.spectra[idxs]
-
-        # Remove NaNs from spectrum.
-        if remove_NaN:
-            idxs = np.isfinite(self.spectra[:, 0])
             self.theta = self.theta[idxs]
             self.spectra = self.spectra[idxs]
 
@@ -808,7 +802,7 @@ class annulus(object):
             vmax = np.take(velax, np.argmax(spectra, axis=1))
         elif method == 'quadratic':
             try:
-                from bettermoments.methods import quadratic
+                from bettermoments.quadratic import quadratic
             except ImportError:
                 raise ImportError("Please install 'bettermoments'.")
             vmax = [quadratic(spectrum, x0=velax[0], dx=np.diff(velax)[0])[0]
@@ -868,11 +862,13 @@ class annulus(object):
                                resample.size + 1)
         else:
             raise TypeError("Resample must be a boolean, int, float or array.")
-        y = binned_statistic(vpnts, spnts, statistic=np.nanmean, bins=bins)[0]
+        idxs = np.isfinite(spnts)
+        vpnts, spnts = vpnts[idxs], spnts[idxs]
+        y = binned_statistic(vpnts, spnts, statistic='mean', bins=bins)[0]
         x = np.average([bins[1:], bins[:-1]], axis=0)
         if not scatter:
             return x, y
-        dy = binned_statistic(vpnts, spnts, statistic=np.nanstd, bins=bins)[0]
+        dy = binned_statistic(vpnts, spnts, statistic='std', bins=bins)[0]
         N = binned_statistic(vpnts, spnts, statistic='count', bins=bins)[0]
         return x, y, dy / N**0.5
 
@@ -1001,10 +997,8 @@ class annulus(object):
         # Plot the data.
         fig, ax = plt.subplots(figsize=(6.0, 2.0))
         ax_divider = make_axes_locatable(ax)
-        im = ax.imshow(spectra, origin='lower', aspect='auto', vmin=vmin,
-                       vmax=vmax, extent=[vaxis[0], vaxis[-1],
-                                          taxis[0], taxis[-1]],
-                       cmap='RdBu_r' if residual else 'bone_r')
+        im = ax.pcolormesh(vaxis, taxis, spectra, vmin=vmin, vmax=vmax,
+                           cmap='RdBu_r' if residual else 'bone_r')
         ax.yaxis.set_major_locator(MultipleLocator(60.0))
         ax.set_xlabel('Velocity (m/s)')
         ax.set_ylabel('Polar Angle (deg)')

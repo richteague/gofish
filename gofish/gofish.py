@@ -59,7 +59,7 @@ class imagecube(object):
                          dist=100., resample=1, beam_spacing=False,
                          mask_frame='disk', unit='Jy/beam', mask=None,
                          assume_correlated=True, skip_empty_annuli=True,
-                         shadowed=True):
+                         shadowed=True, empirical_uncertainty=False):
         """
         Return the averaged spectrum over a given radial range, returning a
         spectrum in units of [Jy/beam] or [K] using the Rayleigh-Jeans
@@ -73,13 +73,9 @@ class imagecube(object):
         times as narrow as the intrinsic width. Instead, ``resample=50.0`` will
         result in a velocity axis with a channel spacing of 50 m/s.
 
-        .. note::
-
-            The third variable returned is the scatter in each velocity bin and
-            not the uncertainty on the bin mean as the data is not strictly
-            independent due to spectral and spatial correlations in the data.
-            If you want to assume uncorrelated data to get a better estimate of
-            the uncertainty, set ``assumed_correlated=False``.
+        The third variable returned is the standard error on the mean of each
+        velocity bin, i.e. the standard deviation of that velocity bin divided
+        by the square root of the number of samples.
 
         Args:
             r_min (Optional[float]): Inner radius in [arcsec] of the region to
@@ -150,6 +146,9 @@ class imagecube(object):
             skip_empty_annuli (Optional[bool]): If ``True``, skip any annuli
                 which are empty (i.e. their masks have zero pixels in). If
                 ``False``, any empty masks will raise a ``ValueError``.
+            empirical_uncertainty (Optional[bool]): If ``True``, use an
+                empirical measure of the uncertainty based on an iterative
+                sigma clipping described in ``imagecube.estimate_uncertainty``.
 
         Returns:
             The velocity axis of the spectrum, ``velax``, in [m/s], the
@@ -158,26 +157,32 @@ class imagecube(object):
             or [K] depending on the ``unit``.
         """
         # Check is cube is 2D.
+
         self._test_2D()
 
-        # Get the integration ranges.
-        if r_min is None and r_max is None:
-            rbins, rvals = self.radial_sampling(rbins=None, rvals=None, dr=dr)
-            r_min, r_max = rbins[0], rbins[-1]
+        # Set the radial sampling. This should try and respect the annuli width
+        # of `dr` as best as possible, but more strictly the minimum and
+        # maximum radii.
 
-        # Figure out the radial binning.
         if dr is None:
-            dr = 2. * self.dpix if self.dpix == self.bmaj else self.bmaj / 4.
+            if self.dpix == self.bmaj:
+                dr = 2.0 * self.dpix
+            else:
+                dr = self.bmaj / 4.0
         nbins = max(1, int(np.floor((r_max - r_min) / dr)))
         rbins = np.linspace(r_min, r_max, nbins + 1)
+        if rbins.size < 2:
+            raise ValueError("Unable to infer suitable `rbins`.")
         _, rvals = self.radial_sampling(rbins=rbins)
 
         # Keplerian velocity at the annulus centers.
+
         v_kep = self._keplerian(rpnts=rvals, mstar=mstar, dist=dist, inc=inc,
                                 z0=z0, psi=psi, z1=z1, phi=phi, z_func=z_func)
         v_kep = np.atleast_1d(v_kep)
 
         # Output unit.
+
         unit = unit.lower()
         if unit not in ['mjy/beam', 'jy/beam', 'mk', 'k']:
             raise ValueError("Unknown `unit`.")
@@ -185,28 +190,38 @@ class imagecube(object):
             print('WARNING: `resample < 1`, are you sure you want channels '
                   + 'narrower than 1 m/s?')
 
-        # Pseduo masking. Make everything masked a NaN and then revert.
-        if mask is not None:
+        # Pseduo masking. Make everything masked a NaN and then revert. The
+        # annulus class should be able to remove any NaN values. We include a
+        # line to allow for a 2D mask to be broadcast to the full 3D cube. Note
+        # that this mask still allows for a mask to be specified with the
+        # `PA_min` and `PA_max` arguments. This is combined when calculating
+        # the number of pixels by considering any pixels which has at least one
+        # finite value in the spectrum.
 
-            # Extend the mask along the velocity axis.
+        if mask is not None:
             if mask.shape != self.data.shape:
                 if mask.shape != self.data.shape[1:]:
                     raise ValueError("Unknown mask shape.")
                 mask = np.ones(self.data.shape) * mask[None, :, :]
-
             saved_data = self.data.copy()
             self.data = np.where(mask, self.data, np.nan)
+            user_mask = np.any(np.isfinite(self.data), axis=0)
+        else:
+            user_mask = np.ones(self.data[0].shape)
 
-        # Get the deprojected spectrum for each annulus.
-        # Have an array to describe whether an annulus is included in the
-        # average or not.
-        spectra, scatter, included = [], [], np.ones(rvals.size).astype('int')
+        # Get the deprojected spectrum for each annulus (or rval). We include
+        # an array to describe whether an annulus is included in the average or
+        # not in order to rescale the uncertainties.
+
+        x_arr, y_arr, dy_arr, npix_arr = [], [], [], []
+        included = np.ones(rvals.size).astype('int')
 
         for ridx in range(rvals.size):
             try:
                 annulus = self.get_annulus(rbins[ridx], rbins[ridx+1],
-                                           x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
-                                           psi=psi, z1=z1, phi=phi,
+                                           x0=x0, y0=y0, inc=inc, PA=PA,
+                                           z0=z0, psi=psi, z1=z1, phi=phi,
+                                           z_func=z_func,
                                            beam_spacing=beam_spacing,
                                            PA_min=PA_min, PA_max=PA_max,
                                            exclude_PA=exclude_PA,
@@ -214,15 +229,10 @@ class imagecube(object):
                                            mask_frame=mask_frame,
                                            shadowed=shadowed)
 
-                x, y, dy = annulus.deprojected_spectrum(vrot=v_kep[ridx],
-                                                        resample=resample,
-                                                        scatter=True)
+            # Complain if no spectra are found in the annulus.
 
-                spectra += [y]
-                scatter += [dy]
             except ValueError:
-                msg = "No pixels in the mask between "
-                msg += "{:.2f} ".format(rbins[ridx])
+                msg = "No pixels found between {:.2f} ".format(rbins[ridx])
                 msg += "and {:.2f} arcsec.".format(rbins[ridx+1])
                 if not skip_empty_annuli:
                     raise ValueError(msg)
@@ -230,16 +240,60 @@ class imagecube(object):
                     included[ridx] = 0
                     if self.verbose:
                         print("WARNING: " + msg + " Skipping annulus.")
+                continue
 
-        # Return the data.
+            # Deproject the spectrum currently using a simple bin average.
+
+            x, y, dy = annulus.deprojected_spectrum(vrot=v_kep[ridx],
+                                                    resample=resample,
+                                                    scatter=True)
+            x_arr += [x]    # velocity axis
+            y_arr += [y]    # deprojected spectrum
+            dy_arr += [dy]  # error on the mean
+
+            # Calculate the number of pixels within the mask. This is combined
+            # with the `user_mask` which is the 2D projection of the user
+            # provided mask which any spectrum contains a finite value.
+
+            npix = self.get_mask(rbins[ridx], rbins[ridx+1], exclude_r=False,
+                                 PA_min=PA_min, PA_max=PA_max,
+                                 exclude_PA=exclude_PA, abs_PA=abs_PA, x0=x0,
+                                 y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
+                                 phi=phi, z_func=z_func, mask_frame=mask_frame,
+                                 shadowed=shadowed)
+            npix_arr += [np.sum(npix * user_mask)]
+
+        # Return the data to it's saved state (i.e. removing the masked NaNs).
+
         if mask is not None:
             self.data = saved_data
 
+        # Check that the velocity axes are the same. If not, regrid them to the
+        # same velocity axis. TODO: Include a flux-preserving algorithm here.
+
+        x = np.median(x_arr, axis=0)
+        if not all(np.isclose(np.std(x_arr, axis=0), 0)):
+            from scipy.interpolate import interp1d
+            y_arr = [interp1d(xx, yy, bounds_error=False)(x)
+                     for xx, yy in zip(x_arr, y_arr)]
+            dy_arr = [interp1d(xx, dd, bounds_error=False)(x)
+                      for xx, dd in zip(x_arr, dy_arr)]
+        N = np.squeeze(npix_arr) * self.dpix**2 / self.beamarea_arcsec
+
+        # I'm not sure if we need this value to account for the `beam_spacing`
+        # value used? Remove it for now...
+
+        # N = np.sqrt(N / max(1, float(beam_spacing)))
+
         # Remove any pesky NaNs.
-        spectra = np.where(np.isfinite(spectra), spectra, 0.0)
-        scatter = np.where(np.isfinite(scatter), scatter, 0.0)
+
+        spectra = np.where(np.isfinite(y_arr), y_arr, 0.0)
+        scatter = np.where(np.isfinite(dy_arr), dy_arr, 0.0)
+        if spectra.size == 0.0:
+            raise ValueError("No finite spectra were returned.")
 
         # Weight the annulus based on its area.
+
         weights = np.pi * (rbins[1:]**2 - rbins[:-1]**2)
         weights = weights[included.astype('bool')]
         weights += 1e-20 * np.random.randn(weights.size)
@@ -249,15 +303,19 @@ class imagecube(object):
                              + "{:d}.".format(spectra.shape[0]))
         spectrum = np.average(spectra, axis=0, weights=weights)
 
-        # Uncertainty propagation.
-        scatter = np.average(scatter, axis=0, weights=weights)
-        if not assume_correlated:
-            N = annulus.theta.size * np.diff(x).mean() / self.chan
-            if not beam_spacing:
-                N *= self.dpix**2 / self._calculate_beam_area_arcsec()
-            scatter /= np.sqrt(N)
+        # Uncertainty propagation. Either combine all the uncertainties
+        # together assuming independent Gaussian distributions, or empirically
+        # measure it. For the former case, we can rescale by the number of
+        # independent beams in the annulus.
+
+        if empirical_uncertainty:
+            scatter = imagecube.estimate_uncertainty(spectrum)
+        else:
+            scatter = np.nansum((scatter * (weights / N)[:, None])**2)**0.5
+            scatter /= np.nansum(weights)
 
         # Convert to K using RJ-approximation.
+
         if unit == 'k':
             spectrum = self.jybeam_to_Tb_RJ(spectrum)
             scatter = self.jybeam_to_Tb_RJ(scatter)
@@ -265,6 +323,40 @@ class imagecube(object):
             spectrum *= 1e3
             scatter *= 1e3
         return x, spectrum, scatter
+
+    @staticmethod
+    def estimate_uncertainty(a, nsigma=3.0, niter=20):
+        """
+        Estimate the noise by iteratively sigma-clipping. For each iteraction
+        the ``a`` array is masked above ``abs(a) > nsigma * std`` and the
+        standard deviation, ``std`` calculated. This is repeated until either
+        convergence or for ``niter`` iteractions. In some cases, usually with
+        low ``nsigma`` values, the ``std`` will approach zero and all ``a``
+        values are masked, resulting in an NaN. In this case, the function will
+        return the last finite value.
+
+        Args:
+            a (array): Array of data from which to estimate the uncertainty.
+            nsigma (Optional[float]): Factor of the standard devitation above
+                which to mask ``a`` values.
+            niter (Optional[int]): Number of iterations to halt after if
+                convergence is not reached.
+
+        Returns:
+            std (float): Standard deviation of the sigma-clipped data.
+        """
+        if niter < 1:
+            raise ValueError("Must have at least one iteration.")
+        nonzero = a != 0.0
+        std = np.nanmax(a)
+        for _ in range(niter):
+            std_new = np.nanstd(a[(abs(a) <= nsigma * std) & nonzero])
+            if std_new == std:
+                return std
+            if np.isnan(std_new) or std_new == 0.0:
+                return std
+            std = std_new
+        return std
 
     def integrated_spectrum(self, r_min=None, r_max=None, dr=None, x0=0.0,
                             y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
@@ -359,14 +451,16 @@ class imagecube(object):
 
         """
         # Check is cube is 2D.
+
         self._test_2D()
 
-        # Get average spectrum.
+        # Get average spectrum for the desired region.
+
         x, y, dy = self.average_spectrum(r_min=r_min, r_max=r_max, dr=dr,
                                          x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
                                          psi=psi, z1=z1, phi=phi,
                                          z_func=z_func, mstar=mstar, dist=dist,
-                                         resample=resample,
+                                         resample=resample, unit='jy/beam',
                                          beam_spacing=beam_spacing,
                                          PA_min=PA_min, PA_max=PA_max,
                                          exclude_PA=exclude_PA, abs_PA=abs_PA,
@@ -375,17 +469,29 @@ class imagecube(object):
                                          skip_empty_annuli=skip_empty_annuli,
                                          shadowed=shadowed)
 
-        # Calculate the area of the mask.
-        if mask is None:
-            mask = self.get_mask(r_min=r_min, r_max=r_max, PA_min=PA_min,
-                                 PA_max=PA_max, exclude_PA=exclude_PA,
-                                 abs_PA=abs_PA, mask_frame=mask_frame, x0=x0,
-                                 y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
-                                 phi=phi, z_func=z_func, shadowed=shadowed)
-        nb = np.sum(mask) * self.dpix**2 / self._calculate_beam_area_arcsec()
+        # Calculate the area of the integration region. TODO: Move this section
+        # to its own function to avoid having to calculate this twice.
 
-        # Return
-        return x, y * nb, dy * nb
+        if mask is not None:
+            if mask.shape != self.data.shape:
+                if mask.shape != self.data.shape[1:]:
+                    raise ValueError("Unknown mask shape.")
+                mask = np.ones(self.data.shape) * mask[None, :, :]
+            _mask_A = np.any(mask, axis=0)
+        else:
+            _mask_A = np.ones(self.data[0].shape)
+
+        _mask_B = self.get_mask(r_min, r_max, exclude_r=False, PA_min=PA_min,
+                                PA_max=PA_max, exclude_PA=exclude_PA,
+                                abs_PA=abs_PA, x0=x0, y0=y0, inc=inc, PA=PA,
+                                z0=z0, psi=psi, z1=z1, phi=phi, z_func=z_func,
+                                mask_frame=mask_frame, shadowed=shadowed)
+
+        beams = np.sum(_mask_A * _mask_B) * self.dpix**2 / self.beamarea_arcsec
+
+        # Rescale from Jy/beam to Jy and return.
+
+        return x, y * beams, dy * beams
 
     def radial_spectra(self, rvals=None, rbins=None, dr=None, x0=0.0,
                        y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
@@ -393,7 +499,8 @@ class imagecube(object):
                        beam_spacing=False, r_min=None, r_max=None,
                        PA_min=None, PA_max=None, exclude_PA=None, abs_PA=False,
                        mask_frame='disk', mask=None, assume_correlated=True,
-                       unit='Jy/beam', shadowed=True):
+                       unit='Jy/beam', shadowed=True, skip_empty_annuli=True,
+                       empirical_uncertainty=False):
         """
         Return shifted and stacked spectra, either integrated flux or average
         spectrum, along the provided radial profile. Possible units for the
@@ -476,51 +583,203 @@ class imagecube(object):
         """
 
         # Check is cube is 2D.
+
         self._test_2D()
 
         # Radial sampling with radial boundaries.
+
         rbins, rvals = self.radial_sampling(rbins=rbins, rvals=rvals, dr=dr)
         r_min = rbins[0] if r_min is None else r_min
         r_max = rbins[-1] if r_max is None else r_max
-        idx_a = 0 if r_min <= rbins[0] else np.argmax(rbins >= r_min)
-        idx_b = rbins.size if r_max >= rbins[-1] else np.argmin(rbins <= r_max)
-        rbins, rvals = self.radial_sampling(rbins=rbins[idx_a:idx_b])
+        rbins = rbins[np.logical_and(rbins >= r_min, rbins <= r_max)]
+        rbins, rvals = self.radial_sampling(rbins=rbins)
+        if rbins.size < 2:
+            raise ValueError("Unable to infer suitable `rbins`.")
 
-        # Cycle through and deproject the spectra.
-        spectra = []
-        for r_min, r_max in zip(rbins[:-1], rbins[1:]):
-            if unit.lower() == 'jy' or unit.lower() == 'mjy':
-                func = self.integrated_spectrum
-                spectra += [func(r_min=r_min, r_max=r_max, dr=dr, x0=x0, y0=y0,
-                                 inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
-                                 phi=phi, z_func=z_func, mstar=mstar,
-                                 dist=dist, resample=resample,
-                                 beam_spacing=beam_spacing, PA_min=PA_min,
-                                 PA_max=PA_max, exclude_PA=exclude_PA,
-                                 abs_PA=abs_PA, mask_frame=mask_frame,
-                                 assume_correlated=assume_correlated,
-                                 mask=mask, shadowed=shadowed)]
+        # Goign to copy a lot of the code from `average_spectrum`, but this is
+        # because we want to fix the radial gridding and it is unclear if that
+        # will be fully respected with `average_spectrum`.
+
+        # Define the velocity at the annulus centers.
+
+        v_kep = self._keplerian(rpnts=rvals, mstar=mstar, dist=dist, inc=inc,
+                                z0=z0, psi=psi, z1=z1, phi=phi, z_func=z_func)
+        v_kep = np.atleast_1d(v_kep)
+
+        # Output unit.
+
+        unit = unit.lower()
+        if unit not in ['mjy/beam', 'jy/beam', 'jy', 'mjy', 'mk', 'k']:
+            raise ValueError("Unknown `unit`.")
+        if resample < 1.0 and self.verbose:
+            print('WARNING: `resample < 1`, are you sure you want channels '
+                  + 'narrower than 1 m/s?')
+
+        # Pseudo masking - see `average_spectrum` for more.
+
+        if mask is not None:
+            if mask.shape != self.data.shape:
+                if mask.shape != self.data.shape[1:]:
+                    raise ValueError("Unknown mask shape.")
+                mask = np.ones(self.data.shape) * mask[None, :, :]
+            saved_data = self.data.copy()
+            self.data = np.where(mask, self.data, np.nan)
+            user_mask = np.any(np.isfinite(self.data), axis=0)
+        else:
+            user_mask = np.ones(self.data[0].shape)
+
+        # Get the deprojected spectrum for each annulus (or rval). We include
+        # an array to describe whether an annulus is included in the average or
+        # not in order to rescale the uncertainties.
+
+        x_arr, y_arr, dy_arr, npix_arr = [], [], [], []
+
+        for ridx in range(rvals.size):
+            try:
+                annulus = self.get_annulus(rbins[ridx], rbins[ridx+1],
+                                           x0=x0, y0=y0, inc=inc, PA=PA,
+                                           z0=z0, psi=psi, z1=z1, phi=phi,
+                                           z_func=z_func,
+                                           beam_spacing=beam_spacing,
+                                           PA_min=PA_min, PA_max=PA_max,
+                                           exclude_PA=exclude_PA,
+                                           abs_PA=abs_PA,
+                                           mask_frame=mask_frame,
+                                           shadowed=shadowed)
+
+                x, y, dy = annulus.deprojected_spectrum(vrot=v_kep[ridx],
+                                                        resample=resample,
+                                                        scatter=True)
+
+            # Complain if no spectra are found in the annulus.
+
+            except ValueError:
+                msg = "No pixels found between {:.2f} ".format(rbins[ridx])
+                msg += "and {:.2f} arcsec.".format(rbins[ridx+1])
+                if not skip_empty_annuli:
+                    raise ValueError(msg)
+                elif self.verbose:
+                    print("WARNING: " + msg + " Skipping annulus.")
+                x, y, dy = [np.nan], [np.nan], [np.nan]
+
+            # Deproject the spectrum currently using a simple bin average.
+
+            x_arr += [x]    # velocity axis
+            y_arr += [y]    # deprojected spectrum
+            dy_arr += [dy]  # error on the mean
+
+            # Calculate the number of pixels within the mask. This is combined
+            # with the `user_mask` which is the 2D projection of the user
+            # provided mask which any spectrum contains a finite value.
+
+            npix = self.get_mask(rbins[ridx], rbins[ridx+1], exclude_r=False,
+                                 PA_min=PA_min, PA_max=PA_max,
+                                 exclude_PA=exclude_PA, abs_PA=abs_PA, x0=x0,
+                                 y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
+                                 phi=phi, z_func=z_func, mask_frame=mask_frame,
+                                 shadowed=shadowed)
+            npix_arr += [np.sum(npix * user_mask)]
+
+        # Sort through all the spectra and resize all the NaN columns where
+        # there were not finite pixels found. This is a bit of a circular
+        # approach because a priori we do not know the size of the (x, y, dy)
+        # lists. We loop through all the finite values to calculate who long
+        # these lists are, then we replace all rows in that list with an
+        # appropriate length NaN.
+
+        size = np.squeeze([y for y in y_arr if all(np.isfinite(y))])
+        if size.size == 0:
+            raise ValueError("No finite spectra were returned.")
+        size = np.atleast_2d(size).shape[1]
+
+        x_arr_tmp = []
+        y_arr_tmp = []
+        dy_arr_tmp = []
+        for idx in range(len(y_arr)):
+            if all(np.isnan(y_arr[idx])):
+                x_arr_tmp += [np.ones(size) * np.nan]
+                y_arr_tmp += [np.ones(size) * np.nan]
+                dy_arr_tmp += [np.ones(size) * np.nan]
             else:
-                func = self.average_spectrum
-                spectra += [func(r_min=r_min, r_max=r_max, dr=dr, x0=x0, y0=y0,
-                                 inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
-                                 phi=phi, z_func=z_func, mstar=mstar,
-                                 dist=dist, resample=resample,
-                                 beam_spacing=beam_spacing, PA_min=PA_min,
-                                 PA_max=PA_max, exclude_PA=exclude_PA,
-                                 abs_PA=abs_PA, mask=mask,
-                                 assume_correlated=assume_correlated,
-                                 mask_frame=mask_frame, unit=unit,
-                                 shadowed=shadowed)]
-        return rvals, np.squeeze(spectra)
+                x_arr_tmp += [x_arr[idx]]
+                y_arr_tmp += [y_arr[idx]]
+                dy_arr_tmp += [dy_arr[idx]]
+
+        x_arr = np.squeeze(x_arr_tmp)
+        y_arr = np.squeeze(y_arr_tmp)
+        dy_arr = np.squeeze(dy_arr_tmp)
+
+        # Return the data to it's saved state (i.e. removing the masked NaNs).
+
+        if mask is not None:
+            self.data = saved_data
+
+        # Check that the velocity axes are the same. If not, regrid them to the
+        # same velocity axis. TODO: Include a flux-preserving algorithm here.
+
+        velax = np.nanmedian(x_arr, axis=0)
+        if not all(np.isclose(np.nanstd(x_arr, axis=0), 0)):
+            from scipy.interpolate import interp1d
+            y_arr = [interp1d(xx, yy, bounds_error=False)(velax)
+                     for xx, yy in zip(x_arr, y_arr)]
+            dy_arr = [interp1d(xx, dd, bounds_error=False)(velax)
+                      for xx, dd in zip(x_arr, dy_arr)]
+
+        # Calculate the number of independent beams in each spectra. This will
+        # take into account both the user-provided mask and any PA ranges set
+        # by the user.
+
+        N = np.squeeze(npix_arr) * self.dpix**2 / self.beamarea_arcsec
+
+        # Note here we don't want to remove any NaNs such that they're not
+        # included in the averaging process.
+
+        spectra = np.squeeze(y_arr)
+        scatter = np.squeeze(dy_arr)
+
+        # Replace scatter with empirical uncertainties if requested.
+        # Note that this is just a single value for each spectrum and so we
+        # need to broadcast it to the same shape as scatter. Otherwise just
+        # rescale the uncertainties by sqrt(N) where N is the number of
+        # independent beams.
+
+        if empirical_uncertainty:
+            scatter = [imagecube.estimate_uncertainty(y) for y in spectra]
+            scatter = np.squeeze(scatter)[:, None] * np.ones(spectra.shape)
+        else:
+            scatter /= np.sqrt(N)[:, None]
+
+        # Apply the rescaling of the pixels. Currently all the spectra are in
+        # Jy/beam units. Conversion to K will use the RJ assumption to avoid
+        # any non-linearities around zero.
+
+        unit = unit.lower()
+        if 'k' in unit:
+            spectra = self.jybeam_to_Tb_RJ(spectra)
+            scatter = self.jybeam_to_Tb_RJ(scatter)
+        elif 'beam' not in unit:
+            spectra *= N[:, None]
+            scatter *= N[:, None]
+        if unit[0] == 'm':
+            spectra *= 1e3
+            scatter *= 1e3
+
+        # Final check things are how we expect them to be, then return.
+
+        if spectra.shape != (rvals.shape[0], velax.shape[0]):
+            raise ValueError("Mismatch between spectra, rvals and velax.")
+        if spectra.shape != scatter.shape:
+            raise ValueError("Mismatch between spectra and scatter.")
+        return rvals, velax, spectra, scatter
 
     def radial_profile(self, rvals=None, rbins=None, dr=None,
                        unit='Jy/beam m/s', x0=0.0, y0=0.0, inc=0.0, PA=0.0,
                        z0=0.0, psi=1.0, z1=0.0, phi=1.0, z_func=None,
-                       mstar=1.0, dist=100., resample=1, beam_spacing=False,
+                       mstar=0.0, dist=100., resample=1, beam_spacing=False,
                        r_min=None, r_max=None, PA_min=None, PA_max=None,
                        exclude_PA=False, abs_PA=False, mask_frame='disk',
-                       velo_range=None, assume_correlated=True, shadowed=True):
+                       mask=None, velo_range=None, assume_correlated=True,
+                       shadowed=True):
         """
         Generate a radial profile from shifted and stacked spectra. There are
         different ways to collapse the spectrum into a single value using the
@@ -538,12 +797,25 @@ class imagecube(object):
 
             - ``'m/s'``
             - ``'km/s'``
+            - ``''``
 
-        Any unit can be made up of these components is possible.
+        with the empty string resulting in the peak value of the spectrum. For
+        example, ``unit='K'`` will return the peak brightness temperature as a
+        function of radius, while ``unit='K km/s'`` will return the velocity
+        integrated brightness temperature as a function of radius.
+
         All conversions from [Jy/beam] to [K] are performed using the
         Rayleigh-Jeans approximation. For other units, or to develop more
         sophisticated statistics for the collapsed line profiles, use the
-        ``radial_spectra`` function.
+        ``radial_spectra`` function which will return the shifted and stacked
+        line profiles.
+
+        .. note:
+
+            The shifting and stacking is only available for 3D cubes. If a 2D
+            cube (quadrilateral?) is detected, this function will revert to a
+            standard azimuthal average without the capability of transforming
+            units.
 
         Args:
             rvals (Optional[floats]): Array of bin centres for the profile in
@@ -599,22 +871,23 @@ class imagecube(object):
                 the polar angle such that it runs from 0 [deg] to 180 [deg].
             mask_frame (Optional[str]): Which frame the radial and azimuthal
                 mask is specified in, either ``'disk'`` or ``'sky'``.
+            mask (Optional[array]): A user-specified 2D or 3D array to mask the
+                data with prior to shifting and stacking.
             velo_range (Optional[tuple]): A tuple containing the spectral
                 range to integrate if required for the provided ``unit``. Can
                 either be a string, including units, or as channel integers.
-            assume_correlated (Optional[bool]): Whether to treat the spectra
-                which are stacked as correlated, by default this is
-                ``True``. If ``False``, the uncertainty will be estimated using
-                Poisson statistics, otherwise the uncertainty is just the
-                standard deviation of each velocity bin.
-            unit (Optional[str]): Desired unit of the output profile.
+            shadowed (Optional[bool]): If ``True``, use a slower algorithm for
+                deprojecting the pixel coordinates into disk-center coordiantes
+                which can handle shadowed pixels.
 
         Returns:
             Arrays of the bin centers in [arcsec], the profile value in the
             requested units and the associated uncertainties.
         """
 
-        # If shifting not available, change function.
+        # If the data is only 2D, we assume this is either a moment map or a
+        # continuum image and so can revert to the 2D approach.
+
         if self.data.ndim == 2:
             return self._radial_profile_2D(rvals=rvals, rbins=rbins, dr=dr,
                                            x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
@@ -627,8 +900,12 @@ class imagecube(object):
                                            assume_correlated=assume_correlated,
                                            shadowed=shadowed)
 
-        # Grab the spectra.
+        # Otherwise we want to grab the shifted and stacked spectra over the
+        # given range. We parse the desired unit into a flux component and a
+        # spectral component. The latter is only needed for any integration.
+
         _flux_unit, _velo_unit = imagecube._parse_unit(unit)
+
         out = self.radial_spectra(rvals=rvals, rbins=rbins, dr=dr,
                                   x0=x0, y0=y0, inc=inc, PA=PA, z0=z0, psi=psi,
                                   z1=z1, phi=phi, z_func=z_func, mstar=mstar,
@@ -636,31 +913,51 @@ class imagecube(object):
                                   beam_spacing=beam_spacing, r_min=r_min,
                                   r_max=r_max, PA_min=PA_min, PA_max=PA_max,
                                   exclude_PA=exclude_PA, abs_PA=abs_PA,
-                                  mask_frame=mask_frame,
+                                  mask_frame=mask_frame, mask=mask,
                                   assume_correlated=assume_correlated,
                                   unit=_flux_unit, shadowed=shadowed)
-        rvals, spectra = out
+        rvals, velax, spectra, scatter = out
 
-        # Collapse the spectra to a radial profile.
+        # Collapse the spectra to a radial profile. The returned `spectra`
+        # should be already in units of 'Jy/beam', 'Jy' or 'K' with associated
+        # uncertainties in `scatter`. Note this for-loop approach was used as
+        # `np.trapz` cannot handle NaNs. We could circumvent this by setting
+        # all NaNs to 0, however those pixels will still be included in the
+        # error propagation.
+
         if _velo_unit is not None:
             scale = 1e0 if _velo_unit == 'm/s' else 1e-3
-            chans = self._parse_channel(velo_range)
-            profile = np.array([np.trapz(s[1][chans[0]:chans[1]+1],
-                                         s[0][chans[0]:chans[1]+1] * scale)
-                                for s in spectra])
+            va, vb = self._parse_channel(velo_range)
+            v_tmp = velax[va:vb+1] * scale
+            profile = []
+            for s in spectra:
+                s_tmp = s[va:vb+1]
+                mask = np.isfinite(s_tmp)
+                profile += [np.trapz(s_tmp[mask], v_tmp[mask])]
+            profile = np.squeeze(profile)
         else:
-            profile = np.nanmax(spectra[:, 1], axis=-1)
+            profile = np.nanmax(spectra, axis=1)
+
         if profile.size != rvals.size:
             raise ValueError("Mismatch in x and y values.")
 
-        # Basic approximation of uncertainty.
+        # Basic approximation of uncertainty. If the profile is a maximum, then
+        # we just take the uncertainty at that position. Otherwise a simple
+        # integration is applied.
+
         if _velo_unit is not None:
-            sigma = np.mean(np.diff(spectra[:, 0], axis=-1), axis=-1) * scale
-            sigma = spectra[:, 2, chans[0]:chans[1]+1]**2 * sigma[:, None]**2
-            sigma = np.sum(sigma, axis=-1)**0.5
+            sigma = scatter * np.diff(velax).mean() * scale
+            sigma = np.nansum(sigma**2, axis=1)**0.5
         else:
-            sigma = np.argmax(spectra[:, 1], axis=-1)
-            sigma = np.array([f[i] for f, i in zip(spectra[:, 2], sigma)])
+            sigma = [s[i] for s, i in zip(scatter, np.argmax(spectra, axis=1))]
+            sigma = np.squeeze(sigma)
+
+        # Check the shapes of the arrays and return.
+
+        if rvals.shape != profile.shape:
+            raise ValueError("Mismatch in rvals and profile shape.")
+        if profile.shape != sigma.shape:
+            raise ValueError("Mismatch in profile and sigma shape.")
         return rvals, profile, sigma
 
     def _parse_channel(self, unit):
@@ -706,7 +1003,7 @@ class imagecube(object):
         """Test to make sure the attached BUNIT value is valid."""
         try:
             bunit, vunit = self.bunit.lower().split(' ')
-        except:
+        except ValueError:
             bunit, vunit = self.bunit.lower(), ''
         bunit = bunit.replace('/pix', '/beam')
         if bunit not in ['jy/beam', 'mjy/beam', 'k', 'mk', 'm/s', 'km/s']:
@@ -1205,8 +1502,8 @@ class imagecube(object):
         # Flatten the data and get deprojected pixel coordinates.
         dvals = self.data.copy().reshape(self.data.shape[0], -1)
         rvals, tvals = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
-                                        psi=psi, z1=z1, phi=phi,
-                                        z_func=z_func, shadowed=shadowed)[:2]
+                                        psi=psi, z1=z1, phi=phi, z_func=z_func,
+                                        shadowed=shadowed)[:2]
         rvals, tvals = rvals.flatten(), tvals.flatten()
         dvals, rvals, tvals = dvals[:, mask].T, rvals[mask], tvals[mask]
 
@@ -1349,12 +1646,19 @@ class imagecube(object):
             try:
                 dr = np.diff(rvals)[0] * 0.5
             except IndexError:
-                dr = 0.125 * self.bmaj
+                if self.dpix == self.bmaj:
+                    dr = 2.0 * self.dpix
+                else:
+                    dr = self.bmaj / 4.0
             rbins = np.linspace(rvals[0] - dr, rvals[-1] + dr, len(rvals) + 1)
         if rbins is not None:
             rvals = np.average([rbins[1:], rbins[:-1]], axis=0)
         else:
-            dr = 0.25 * self.bmaj if dr is None else dr
+            if dr is None:
+                if self.dpix == self.bmaj:
+                    dr = 2.0 * self.dpix
+                else:
+                    dr = self.bmaj / 4.0
             rbins = np.arange(0, self.xaxis.max(), dr)
             rvals = np.average([rbins[1:], rbins[:-1]], axis=0)
         return rbins, rvals
@@ -2159,14 +2463,14 @@ class imagecube(object):
                       z1=0.0, phi=0.0, z_func=None, resample=1,
                       beam_spacing=False, r_min=None, r_max=None,
                       PA_min=None, PA_max=None, exclude_PA=False, abs_PA=False,
-                      mask_frame='disk', unit='Jy/beam', imshow_kwargs=None,
-                      shadowed=True):
+                      mask_frame='disk', mask=None, unit='Jy/beam',
+                      pcolormesh_kwargs=None, shadowed=True):
         """
         Make a `teardrop` plot. For argument descriptions see
-        ``radial_spectra``. For all properties related to ``imshow``, include
-        them in ``imshow_kwargs`` as a dictionary, e.g.
+        ``radial_spectra``. For all properties related to ``pcolormesh``,
+        include them in ``pcolormesh_kwargs`` as a dictionary, e.g.
 
-            imshow_kwargs = dict(cmap='inferno', vmin=0.0, vmax=1.0)
+            pcolormesh_kwargs = dict(cmap='inferno', vmin=0.0, vmax=1.0)
 
         This will override any of the default style parameters.
         """
@@ -2181,26 +2485,22 @@ class imagecube(object):
                                   beam_spacing=beam_spacing, r_min=r_min,
                                   r_max=r_max, PA_min=PA_min, PA_max=PA_max,
                                   exclude_PA=exclude_PA, abs_PA=abs_PA,
-                                  mask_frame=mask_frame, unit=unit,
+                                  mask_frame=mask_frame, mask=mask, unit=unit,
                                   shadowed=shadowed)
-        rvals, spectra = out
-        velax = spectra[0, 0]
+        rvals, velax, spectra, scatter = out
 
         # Generate the axes.
         if ax is None:
             fig, ax = plt.subplots()
 
         # Plot the figure.
-        extent = [velax[0], velax[-1], rvals[0], rvals[-1]]
-        imshow_kwargs = {} if imshow_kwargs is None else imshow_kwargs
-        imshow_kwargs['origin'] = imshow_kwargs.pop('origin', 'lower')
-        imshow_kwargs['cmap'] = imshow_kwargs.pop('cmap', 'inferno')
-        imshow_kwargs['aspect'] = imshow_kwargs.pop('aspect', 'auto')
-        imshow_kwargs['extent'] = imshow_kwargs.pop('extent', extent)
-        im = ax.imshow(spectra[:, 1], **imshow_kwargs)
+        if pcolormesh_kwargs is None:
+            pcolormesh_kwargs = {}
+        pcolormesh_kwargs['cmap'] = pcolormesh_kwargs.pop('cmap', 'inferno')
+        im = ax.pcolormesh(velax / 1e3, rvals, spectra, **pcolormesh_kwargs)
         cb = plt.colorbar(im, pad=0.02)
         cb.set_label('({})'.format(unit), rotation=270, labelpad=13)
-        ax.set_xlabel('Velocity (m/s)')
+        ax.set_xlabel('Velocity (km/s)')
         ax.set_ylabel('Radius (arcsec)')
         return ax
 
