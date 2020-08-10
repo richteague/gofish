@@ -40,7 +40,7 @@ extensions = [
 master_doc = "index"
 
 # Get that autodoc working.
-autodoc_mock_imports = ['astropy', 'scipy', 'eddy', 'numpy']
+autodoc_mock_imports = ['astropy', 'scipy', 'eddy', 'numpy', 'matplotlib']
 autodoc_member_order = 'bysource'
 
 # Add any paths that contain templates here, relative to this directory.
