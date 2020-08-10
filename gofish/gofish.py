@@ -498,13 +498,13 @@ class imagecube(object):
                        phi=1.0, z_func=None, mstar=1.0, dist=100., resample=1,
                        beam_spacing=False, r_min=None, r_max=None,
                        PA_min=None, PA_max=None, exclude_PA=None, abs_PA=False,
-                       mask_frame='disk', mask=None, assume_correlated=True,
-                       unit='Jy/beam', shadowed=True, skip_empty_annuli=True,
+                       mask_frame='disk', mask=None, unit='Jy/beam',
+                       shadowed=True, skip_empty_annuli=True,
                        empirical_uncertainty=False):
         """
-        Return shifted and stacked spectra, either integrated flux or average
-        spectrum, along the provided radial profile. Possible units for the
-        flux (density) are:
+        Return shifted and stacked spectra, over a given spatial region in the
+        disk. The averaged spectra can be rescaled by using the ``unit``
+        argument for which the possible units are:
 
             - ``'mJy/beam'``
             - ``'Jy/beam'``
@@ -512,6 +512,29 @@ class imagecube(object):
             - ``'K'``
             - ``'mJy'``
             - ``'Jy'``
+
+        where ``'mJy'`` or ``'Jy'`` will integrate the emission over the
+        defined spatial range assuming that the averaged spectrum is the same
+        for all pixels in that region.
+
+        In addition to a spatial region specified by the usual geometrical mask
+        properties (``r_min``, ``r_max``, ``PA_min``, ``PA_max``), a
+        user-defined can be included, either as a 2D array (such that it is
+        constant as a function of velocity), or as a 3D array, for example a
+        CLEAN mask, for velocity-specific masks.
+
+        There are two ways to return the uncertainties for the spectra. The
+        default are the straight `statistical` uncertainties which are
+        propagated through from the ``annulus`` class. Sometimes these can
+        appear to give a poor description of the true variance of the data. In
+        this case the user can use ``empirical_uncertainty=True`` which will
+        use an iterative sigma-clipping approach to estimate the uncertainty
+        by the variance in line-free regions of the spectrum.
+
+        .. note:
+            Calculation of the empirircal uncertainty is experimental. Use
+            the results with caution and if anything looks suspicious, please
+            contact me.
 
         Args:
             rvals (Optional[floats]): Array of bin centres for the profile in
@@ -544,7 +567,7 @@ class imagecube(object):
                 many channels, while a float specifies the desired channel
                 width. Default is ``resample=1``.
             beam_spacing(Optional[bool]): When extracting the annuli, whether
-                to choose spatially independent pixels or not.
+                to choose spatially independent pixels or not. Default it not.
             r_min (Optional[float]): Inner radius in [arcsec] of the region to
                 integrate. The value used will be greater than or equal to
                 ``r_min``.
@@ -565,21 +588,27 @@ class imagecube(object):
                 the polar angle such that it runs from 0 [deg] to 180 [deg].
             mask_frame (Optional[str]): Which frame the radial and azimuthal
                 mask is specified in, either ``'disk'`` or ``'sky'``.
-            assume_correlated (Optional[bool]): Whether to treat the spectra
-                which are stacked as correlated, by default this is
-                ``True``. If ``False``, the uncertainty will be estimated using
-                Poisson statistics, otherwise the uncertainty is just the
-                standard deviation of each velocity bin.
-            unit (Optional[str]): Desired unit of the output spectrum.
+            mask (Optional[arr]): A 2D or 3D mask to include in addition to the
+                geometrical mask. If 3D, must match the shape of the ``data``
+                array, while a 2D mask will be interpretted as a velocity
+                independent mask and must match ``data[0].shape``.
+            unit (Optional[str]): Desired unit of the output spectra.
+            shadowed (Optional[bool]): If ``True``, use a slower but more
+                accurate deprojection algorithm which will handle shadowed
+                pixels due to sub-structure.
+            skip_empty_annuli (Optional[bool]): If ``True``, skip any annuli
+                which are found to have no finite spectra in them, returning
+                ``NaN`` for that annlus. Otherwise raise a ``ValueError``.
+            empirical_uncertainty (Optional[bool]): Whether to calculate the
+                uncertainty on the spectra empirically (``True``) or using the
+                statistical uncertainties.
 
         Returns:
-            An array of the bin centers, ``rvals``, and an array of deprojected
-            spectra. This will have shape (M, 3, N) where M is the number of
-            radial samples, ``rvals.size`` and N is the number of channels,
-            ``velax.size`` if ``resample=1``. The three arrays are the velocity
-            axis in [m/s], the spectrum, in either [Jy] or [Jy/beam] depending
-            on the choice of ``spectrum``, and the uncertainty in the same
-            units.
+            Four arrays. An array of the bin centers, ``rvals``, an array of
+            the velocity axis, ``velax``, and the averaged spectra, ``spectra``
+            and their associated uncertainties, ``scatter``. The latter two
+            will have shapes of ``(rvals.size, velax.size)`` and wil be in
+            units given by the ``unit`` argument.
         """
 
         # Check is cube is 2D.
