@@ -82,3 +82,5 @@ If you use `GoFish` as part of your research, please cite the [JOSS article](htt
     journal = {The Journal of Open Source Software}
 }
 ```
+
+A list of works using `GoFish` can be found [here](https://ui.adsabs.harvard.edu/abs/2019JOSS....4.1632T/citations).
