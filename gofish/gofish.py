@@ -41,7 +41,7 @@ class imagecube(object):
 
         if clip is not None:
             print("WARNING: `clip` is depreciated, use `FOV` instead.")
-            FOV = clip
+            FOV = 2.0 * clip
 
         if FOV is not None:
             self._clip_cube_spatial(FOV/2.0)
@@ -2052,6 +2052,12 @@ class imagecube(object):
             self.velax = None
             self.chan = None
             self.freqax = None
+
+        # Check that the data is saved such that increasing indices in x are
+        # decreasing in offset counter to the yaxis.
+        if np.diff(self.xaxis).mean() > 0.0:
+            self.xaxis = self.xaxis[::-1]
+            self.data = self.data[:, ::-1]
 
         # Beam.
         self._read_beam()
