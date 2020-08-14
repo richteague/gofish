@@ -531,7 +531,7 @@ class imagecube(object):
         use an iterative sigma-clipping approach to estimate the uncertainty
         by the variance in line-free regions of the spectrum.
 
-        .. note:
+        .. note::
             Calculation of the empirircal uncertainty is experimental. Use
             the results with caution and if anything looks suspicious, please
             contact me.
