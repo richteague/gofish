@@ -716,7 +716,7 @@ class imagecube(object):
         # these lists are, then we replace all rows in that list with an
         # appropriate length NaN.
 
-        size = np.squeeze([y for y in y_arr if all(np.isfinite(y))])
+        size = np.squeeze([y for y in y_arr if any(np.isfinite(y))])
         if size.size == 0:
             raise ValueError("No finite spectra were returned.")
         size = np.atleast_2d(size).shape[1]
@@ -943,9 +943,17 @@ class imagecube(object):
                                   r_max=r_max, PA_min=PA_min, PA_max=PA_max,
                                   exclude_PA=exclude_PA, abs_PA=abs_PA,
                                   mask_frame=mask_frame, mask=mask,
-                                  assume_correlated=assume_correlated,
                                   unit=_flux_unit, shadowed=shadowed)
         rvals, velax, spectra, scatter = out
+
+        # Cut down the spectra to the correct velocity range. Find the channels
+        # closest to the requested values but extend the range to make sure
+        # those channels are included.
+
+        va, vb = self._parse_channel(velo_range)
+        velax = velax[va:vb]
+        spectra = spectra[:, va:vb+1]
+        scatter = scatter[:, va:vb+1]
 
         # Collapse the spectra to a radial profile. The returned `spectra`
         # should be already in units of 'Jy/beam', 'Jy' or 'K' with associated
@@ -956,11 +964,9 @@ class imagecube(object):
 
         if _velo_unit is not None:
             scale = 1e0 if _velo_unit == 'm/s' else 1e-3
-            va, vb = self._parse_channel(velo_range)
-            v_tmp = velax[va:vb+1] * scale
+            v_tmp = velax * scale
             profile = []
-            for s in spectra:
-                s_tmp = s[va:vb+1]
+            for s_tmp in spectra:
                 mask = np.isfinite(s_tmp)
                 profile += [np.trapz(s_tmp[mask], v_tmp[mask])]
             profile = np.squeeze(profile)
