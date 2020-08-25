@@ -2058,6 +2058,7 @@ class imagecube(object):
             self.velax = None
             self.chan = None
             self.freqax = None
+        self.channels = np.arange(self.velax.size)
 
         # Check that the data is saved such that increasing indices in x are
         # decreasing in offset counter to the yaxis.
