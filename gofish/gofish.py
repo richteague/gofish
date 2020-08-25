@@ -1793,7 +1793,7 @@ class imagecube(object):
 
     def disk_coords(self, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=0.0,
                     z1=0.0, phi=0.0, z_func=None, frame='cylindrical',
-                    shadowed=True, extend=2.0, oversample=2.0,
+                    shadowed=False, extend=2.0, oversample=2.0,
                     griddata_kw=None):
         r"""
         Get the disk coordinates given certain geometrical parameters and an
