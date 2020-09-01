@@ -1351,15 +1351,13 @@ class imagecube(object):
                  PA_min=None, PA_max=None, exclude_PA=False, abs_PA=False,
                  x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
                  phi=1.0, z_func=None, mstar=None, dist=None, mask=None,
-                 mask_frame='disk', beam_spacing=True, annulus_kwargs=None,
-                 get_vlos_kwargs=None, shadowed=False):
+                 mask_frame='disk', beam_spacing=True, fit_vrad=True,
+                 annulus_kwargs=None, get_vlos_kwargs=None, shadowed=False):
         """
         Infer the rotational and radial velocity profiles from the data
         following the approach described in `Teague et al. (2018)`_. The cube
         will be split into annuli, with the `get_vlos()` function from
         `annulus` being used to infer the rotational (and radial) velocities.
-        Note that to return also radial velocities, you must include
-        ``get_vlos_kwargs=dict(fit_vrad=True)``.
 
         .. _Teague et al. 2018: https://ui.adsabs.harvard.edu/abs/2018ApJ...868..113T/abstract
 
@@ -1411,6 +1409,8 @@ class imagecube(object):
                 annulus such that each pixel is at least a beam FWHM apart. A
                 number can also be used in place of a boolean which will
                 describe the number of beam FWHMs to separate each sample by.
+            fit_vrad (Optional[bool]): Whether to include radial velocities in
+                the optimization.
             annulus_kwargs (Optional[dict]): Kwargs to pass to ``get_annulus``.
             get_vlos_kwargs (Optional[dict]): Kwargs to pass to
                 ``annulus.get_vlos``.
@@ -1456,9 +1456,13 @@ class imagecube(object):
                 rms = self.estimate_RMS()
                 ln_sig = np.log(np.std(annulus.spectra))
                 ln_rho = np.log(150.)
-                get_vlos_kwargs['p0'] = [vrot, vrad, rms, ln_sig, ln_rho]
+                if fit_vrad:
+                    get_vlos_kwargs['p0'] = [vrot, vrad, rms, ln_sig, ln_rho]
+                else:
+                    get_vlos_kwargs['p0'] = [vrot, rms, ln_sig, ln_rho]
             else:
                 get_vlos_kwargs['p0'] = None
+                get_vlos_kwargs['fit_vrad'] = fit_vrad
             returns += [annulus.get_vlos(**get_vlos_kwargs)]
         return rpnts, np.squeeze(returns)
 
