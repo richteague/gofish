@@ -54,9 +54,10 @@ class imagecube(object):
 
     def average_spectrum(self, r_min=None, r_max=None, dr=None,
                          PA_min=None, PA_max=None, exclude_PA=False,
-                         abs_PA=False, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
-                         psi=1.0, z1=0.0, phi=1.0, z_func=None, mstar=1.0,
-                         dist=100., resample=1, beam_spacing=False,
+                         abs_PA=False, x0=0.0, y0=0.0, inc=0.0, PA=0.0,
+                         z0=None, psi=None, r_cavity=None, r_taper=None,
+                         q_taper=None, z1=None, phi=None, z_func=None,
+                         mstar=1.0, dist=100., resample=1, beam_spacing=False,
                          mask_frame='disk', unit='Jy/beam', mask=None,
                          assume_correlated=True, skip_empty_annuli=True,
                          shadowed=False, empirical_uncertainty=False):
@@ -178,7 +179,9 @@ class imagecube(object):
         # Keplerian velocity at the annulus centers.
 
         v_kep = self._keplerian(rpnts=rvals, mstar=mstar, dist=dist, inc=inc,
-                                z0=z0, psi=psi, z1=z1, phi=phi, z_func=z_func)
+                                z0=z0, psi=psi, r_cavity=r_cavity,
+                                r_taper=r_taper, q_taper=q_taper, z1=z1,
+                                phi=phi, z_func=z_func)
         v_kep = np.atleast_1d(v_kep)
 
         # Output unit.
@@ -221,7 +224,8 @@ class imagecube(object):
                 annulus = self.get_annulus(rbins[ridx], rbins[ridx+1],
                                            x0=x0, y0=y0, inc=inc, PA=PA,
                                            z0=z0, psi=psi, z1=z1, phi=phi,
-                                           z_func=z_func,
+                                           r_taper=r_taper, q_taper=q_taper,
+                                           r_cavity=r_cavity, z_func=z_func,
                                            beam_spacing=beam_spacing,
                                            PA_min=PA_min, PA_max=PA_max,
                                            exclude_PA=exclude_PA,
@@ -259,8 +263,9 @@ class imagecube(object):
                                  PA_min=PA_min, PA_max=PA_max,
                                  exclude_PA=exclude_PA, abs_PA=abs_PA, x0=x0,
                                  y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
-                                 phi=phi, z_func=z_func, mask_frame=mask_frame,
-                                 shadowed=shadowed)
+                                 phi=phi, r_cavity=r_cavity, r_taper=r_taper,
+                                 q_taper=q_taper, z_func=z_func,
+                                 mask_frame=mask_frame, shadowed=shadowed)
             npix_arr += [np.sum(npix * user_mask)]
 
         # Return the data to it's saved state (i.e. removing the masked NaNs).
@@ -359,8 +364,9 @@ class imagecube(object):
         return std
 
     def integrated_spectrum(self, r_min=None, r_max=None, dr=None, x0=0.0,
-                            y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
-                            phi=1.0, z_func=None, mstar=1.0, dist=100.,
+                            y0=0.0, inc=0.0, PA=0.0, z0=None, psi=None,
+                            r_cavity=None, r_taper=None, q_taper=None, z1=None,
+                            phi=None, z_func=None, mstar=1.0, dist=100.,
                             resample=1, beam_spacing=False, PA_min=None,
                             PA_max=None, exclude_PA=False, abs_PA=False,
                             mask=None, mask_frame='disk',
@@ -459,7 +465,9 @@ class imagecube(object):
         x, y, dy = self.average_spectrum(r_min=r_min, r_max=r_max, dr=dr,
                                          x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
                                          psi=psi, z1=z1, phi=phi,
-                                         z_func=z_func, mstar=mstar, dist=dist,
+                                         r_cavity=r_cavity, r_taper=r_taper,
+                                         q_taper=q_taper, z_func=z_func,
+                                         mstar=mstar, dist=dist,
                                          resample=resample, unit='jy/beam',
                                          beam_spacing=beam_spacing,
                                          PA_min=PA_min, PA_max=PA_max,
@@ -484,7 +492,9 @@ class imagecube(object):
         _mask_B = self.get_mask(r_min, r_max, exclude_r=False, PA_min=PA_min,
                                 PA_max=PA_max, exclude_PA=exclude_PA,
                                 abs_PA=abs_PA, x0=x0, y0=y0, inc=inc, PA=PA,
-                                z0=z0, psi=psi, z1=z1, phi=phi, z_func=z_func,
+                                z0=z0, psi=psi, z1=z1, phi=phi,
+                                r_cavity=r_cavity, r_taper=r_taper,
+                                q_taper=q_taper, z_func=z_func,
                                 mask_frame=mask_frame, shadowed=shadowed)
 
         beams = np.sum(_mask_A * _mask_B) * self.dpix**2 / self.beamarea_arcsec
@@ -493,9 +503,10 @@ class imagecube(object):
 
         return x, y * beams, dy * beams
 
-    def radial_spectra(self, rvals=None, rbins=None, dr=None, x0=0.0,
-                       y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
-                       phi=1.0, z_func=None, mstar=1.0, dist=100., resample=1,
+    def radial_spectra(self, rvals=None, rbins=None, dr=None, x0=0.0, y0=0.0,
+                       inc=0.0, PA=0.0, z0=None, psi=None, r_cavity=None,
+                       r_taper=None, q_taper=None, z1=None, phi=None,
+                       z_func=None, mstar=1.0, dist=100., resample=1,
                        beam_spacing=False, r_min=None, r_max=None,
                        PA_min=None, PA_max=None, exclude_PA=None, abs_PA=False,
                        mask_frame='disk', mask=None, unit='Jy/beam',
@@ -632,7 +643,9 @@ class imagecube(object):
         # Define the velocity at the annulus centers.
 
         v_kep = self._keplerian(rpnts=rvals, mstar=mstar, dist=dist, inc=inc,
-                                z0=z0, psi=psi, z1=z1, phi=phi, z_func=z_func)
+                                z0=z0, psi=psi, z1=z1, phi=phi,
+                                r_cavity=r_cavity, r_taper=r_taper,
+                                q_taper=q_taper, z_func=z_func)
         v_kep = np.atleast_1d(v_kep)
 
         # Output unit.
@@ -668,7 +681,8 @@ class imagecube(object):
                 annulus = self.get_annulus(rbins[ridx], rbins[ridx+1],
                                            x0=x0, y0=y0, inc=inc, PA=PA,
                                            z0=z0, psi=psi, z1=z1, phi=phi,
-                                           z_func=z_func,
+                                           r_cavity=r_cavity, r_taper=r_taper,
+                                           q_taper=q_taper, z_func=z_func,
                                            beam_spacing=beam_spacing,
                                            PA_min=PA_min, PA_max=PA_max,
                                            exclude_PA=exclude_PA,
@@ -705,8 +719,9 @@ class imagecube(object):
                                  PA_min=PA_min, PA_max=PA_max,
                                  exclude_PA=exclude_PA, abs_PA=abs_PA, x0=x0,
                                  y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
-                                 phi=phi, z_func=z_func, mask_frame=mask_frame,
-                                 shadowed=shadowed)
+                                 phi=phi, r_cavity=r_cavity, r_taper=r_taper,
+                                 q_taper=q_taper, z_func=z_func,
+                                 mask_frame=mask_frame, shadowed=shadowed)
             npix_arr += [np.sum(npix * user_mask)]
 
         # Sort through all the spectra and resize all the NaN columns where
@@ -803,7 +818,8 @@ class imagecube(object):
 
     def radial_profile(self, rvals=None, rbins=None, dr=None,
                        unit='Jy/beam m/s', x0=0.0, y0=0.0, inc=0.0, PA=0.0,
-                       z0=0.0, psi=1.0, z1=0.0, phi=1.0, z_func=None,
+                       z0=None, psi=None, r_cavity=None, r_taper=None,
+                       q_taper=None, z1=None, phi=None, z_func=None,
                        mstar=0.0, dist=100., resample=1, beam_spacing=False,
                        r_min=None, r_max=None, PA_min=None, PA_max=None,
                        exclude_PA=False, abs_PA=False, mask_frame='disk',
@@ -921,6 +937,8 @@ class imagecube(object):
             return self._radial_profile_2D(rvals=rvals, rbins=rbins, dr=dr,
                                            x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
                                            psi=psi, z1=z1, phi=phi,
+                                           r_cavity=r_cavity, r_taper=r_taper,
+                                           q_taper=q_taper,
                                            z_func=z_func, r_min=r_min,
                                            r_max=r_max, PA_min=PA_min,
                                            PA_max=PA_max, abs_PA=abs_PA,
@@ -937,7 +955,9 @@ class imagecube(object):
 
         out = self.radial_spectra(rvals=rvals, rbins=rbins, dr=dr,
                                   x0=x0, y0=y0, inc=inc, PA=PA, z0=z0, psi=psi,
-                                  z1=z1, phi=phi, z_func=z_func, mstar=mstar,
+                                  z1=z1, phi=phi, r_cavity=r_cavity,
+                                  r_taper=r_taper, q_taper=q_taper,
+                                  z_func=z_func, mstar=mstar,
                                   dist=dist, resample=resample,
                                   beam_spacing=beam_spacing, r_min=r_min,
                                   r_max=r_max, PA_min=PA_min, PA_max=PA_max,
@@ -1057,8 +1077,9 @@ class imagecube(object):
             raise ValueError("Cube is only 2D. Shifting not available.")
 
     def _radial_profile_2D(self, rvals=None, rbins=None, dr=None, x0=0.0,
-                           y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
-                           phi=1.0, z_func=None, r_min=None, r_max=None,
+                           y0=0.0, inc=0.0, PA=0.0, z0=None, psi=None,
+                           r_cavity=None, r_taper=None, q_taper=None, z1=None,
+                           phi=None, z_func=None, r_min=None, r_max=None,
                            PA_min=None, PA_max=None, exclude_PA=False,
                            abs_PA=False, mask_frame='disk',
                            assume_correlated=False, percentiles=False,
@@ -1090,15 +1111,17 @@ class imagecube(object):
                              PA_max=PA_max, exclude_PA=exclude_PA,
                              abs_PA=abs_PA, mask_frame=mask_frame, x0=x0,
                              y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
-                             phi=phi, z_func=z_func, shadowed=shadowed)
+                             phi=phi, r_cavity=r_cavity, r_taper=r_taper,
+                             q_taper=q_taper, z_func=z_func, shadowed=shadowed)
         if mask.shape != self.data.shape:
             raise ValueError("Mismatch in mask and data shape.")
         mask = mask.flatten()
 
         # Deprojection of the disk coordinates.
         rpnts = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA, z0=z0, psi=psi,
-                                 z1=z1, phi=phi, z_func=z_func,
-                                 shadowed=shadowed)[0]
+                                 z1=z1, phi=phi, r_cavity=r_cavity,
+                                 r_taper=r_taper, q_taper=q_taper,
+                                 z_func=z_func, shadowed=shadowed)[0]
         if rpnts.shape != self.data.shape:
             raise ValueError("Mismatch in rvals and data shape.")
         rpnts = rpnts.flatten()
@@ -1130,8 +1153,9 @@ class imagecube(object):
 
         return rvals, ravgs, rstds
 
-    def shifted_cube(self, inc, PA, x0=0.0, y0=0.0, z0=0.0, psi=1.0, z1=0.0,
-                     phi=1.0, z_func=None, mstar=None, dist=None, v0=None,
+    def shifted_cube(self, inc, PA, x0=0.0, y0=0.0, z0=None, psi=None,
+                     r_cavity=None, r_taper=None, q_taper=None, z1=None,
+                     phi=None, z_func=None, mstar=None, dist=None, v0=None,
                      r_min=None, r_max=None, fill_val=np.nan, save=False,
                      shadowed=False):
         """
@@ -1170,7 +1194,9 @@ class imagecube(object):
         # Radial positions.
         rvals, tvals, _ = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA,
                                            z0=z0, psi=psi, z1=z1, phi=phi,
-                                           z_func=z_func, shadowed=shadowed)
+                                           r_cavity=r_cavity, r_taper=r_taper,
+                                           q_taper=q_taper, z_func=z_func,
+                                           shadowed=shadowed)
         r_min = 0.0 if r_min is None else r_min
         r_max = rvals.max() if r_max is None else r_max
         mask = np.logical_and(rvals >= r_min, rvals <= r_max)
@@ -1183,7 +1209,8 @@ class imagecube(object):
                 raise ValueError("Must specify `dist` with `mstar`.")
             vmod = self._keplerian(rpnts=rvals, mstar=mstar, dist=dist,
                                    inc=inc, z0=z0, psi=psi, z1=z1, phi=phi,
-                                   z_func=z_func)
+                                   r_cavity=r_cavity, r_taper=r_taper,
+                                   q_taper=q_taper, z_func=z_func)
             vmod *= np.cos(tvals)
         elif v0 is not None:
             vmod = v0(rvals)
@@ -1309,7 +1336,8 @@ class imagecube(object):
         return np.max(y_tmp) / np.nanmean(dy[~mask])
 
     def _keplerian(self, rpnts, mstar=1.0, dist=100., inc=90.0, z0=0.0,
-                   psi=1.0, z1=0.0, phi=1.0, z_func=None):
+                   psi=1.0, z1=0.0, phi=1.0, r_cavity=0.0, r_taper=np.inf,
+                   q_taper=1.0, z_func=None):
         """
         Return a Keplerian rotation profile [m/s] at rpnts [arcsec].
 
@@ -1335,11 +1363,22 @@ class imagecube(object):
             vkep (ndarray/float): Keplerian rotation curve [m/s] at the
                 specified radial locations.
         """
+
+        # Set the defaults.
+        z0 = 0.0 if z0 is None else z0
+        psi = 1.0 if psi is None else psi
+        z1 = 0.0 if z1 is None else z1
+        phi = 1.0 if phi is None else phi
+        r_taper = np.inf if r_taper is None else r_taper
+        q_taper = 1.0 if q_taper is None else q_taper
+        r_cavity = 0.0 if r_cavity is None else r_cavity
         rpnts = np.squeeze(rpnts)
         if z_func is None:
-            zvals = z0 * np.power(rpnts, psi) + z1 * np.power(rpnts, phi)
-        else:
-            zvals = z_func(rpnts)
+            def z_func(r_in):
+                r = np.clip(r_in - r_cavity, a_min=0.0, a_max=None)
+                z = z0 * np.power(r, psi) + z1 * np.power(r, phi)
+                return z * np.exp(-np.power(r / r_taper, q_taper))
+        zvals = z_func(rpnts)
         r_m, z_m = rpnts * dist * sc.au, zvals * dist * sc.au
         vkep = sc.G * mstar * 1.988e30 * np.power(r_m, 2.0)
         vkep = np.sqrt(vkep / np.power(np.hypot(r_m, z_m), 3.0))
@@ -1349,8 +1388,9 @@ class imagecube(object):
 
     def get_vlos(self, rvals=None, rbins=None, r_min=None, r_max=None,
                  PA_min=None, PA_max=None, exclude_PA=False, abs_PA=False,
-                 x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0, z1=0.0,
-                 phi=1.0, z_func=None, mstar=None, dist=None, mask=None,
+                 x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=None, psi=None,
+                 r_cavity=None, r_taper=None, q_taper=None, z1=None, phi=None,
+                 z_func=None, mstar=None, dist=None, mask=None,
                  mask_frame='disk', beam_spacing=True, fit_vrad=True,
                  annulus_kwargs=None, get_vlos_kwargs=None, shadowed=False):
         """
@@ -1443,7 +1483,9 @@ class imagecube(object):
                                        PA_min=PA_min, PA_max=PA_max,
                                        exclude_PA=exclude_PA, abs_PA=abs_PA,
                                        x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
-                                       psi=psi, z1=z1, phi=phi, z_func=z_func,
+                                       psi=psi, z1=z1, phi=phi,
+                                       r_cavity=r_cavity, r_taper=r_taper,
+                                       q_taper=q_taper, z_func=z_func,
                                        mask=mask, beam_spacing=beam_spacing,
                                        shadowed=shadowed)
 
@@ -1451,7 +1493,9 @@ class imagecube(object):
             if mstar is not None:
                 vrot = self._keplerian(rpnts=rpnts[ridx], mstar=mstar,
                                        dist=dist, inc=inc, z0=z0, psi=psi,
-                                       z1=z1, phi=phi, z_func=z_func)
+                                       z1=z1, phi=phi, r_cavity=r_cavity,
+                                       r_taper=r_taper, q_taper=q_taper,
+                                       z_func=z_func)
                 vrad = 0.0
                 rms = self.estimate_RMS()
                 ln_sig = np.log(np.std(annulus.spectra))
@@ -1470,7 +1514,8 @@ class imagecube(object):
 
     def get_annulus(self, r_min, r_max, PA_min=None, PA_max=None,
                     exclude_PA=False, abs_PA=False, x0=0.0, y0=0.0, inc=0.0,
-                    PA=0.0, z0=0.0, psi=1.0, z1=0.0, phi=1.0, z_func=None,
+                    PA=0.0, z0=None, psi=None, r_cavity=None, r_taper=None,
+                    q_taper=None, z1=None, phi=None, z_func=None,
                     mask=None, mask_frame='disk', beam_spacing=True,
                     annulus_kwargs=None, shadowed=False):
         """
@@ -1532,8 +1577,9 @@ class imagecube(object):
                                  PA_min=PA_min, PA_max=PA_max,
                                  exclude_PA=exclude_PA, abs_PA=abs_PA, x0=x0,
                                  y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
-                                 phi=phi, z_func=z_func, mask_frame=mask_frame,
-                                 shadowed=shadowed)
+                                 phi=phi, r_cavity=r_cavity, r_taper=r_taper,
+                                 q_taper=q_taper, z_func=z_func,
+                                 mask_frame=mask_frame, shadowed=shadowed)
         if mask.shape != self.data[0].shape:
             raise ValueError("`mask` is incorrect shape.")
         mask = mask.flatten()
@@ -1541,7 +1587,9 @@ class imagecube(object):
         # Flatten the data and get deprojected pixel coordinates.
         dvals = self.data.copy().reshape(self.data.shape[0], -1)
         rvals, tvals = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
-                                        psi=psi, z1=z1, phi=phi, z_func=z_func,
+                                        psi=psi, z1=z1, phi=phi,
+                                        r_cavity=r_cavity, r_taper=r_taper,
+                                        q_taper=q_taper, z_func=z_func,
                                         shadowed=shadowed)[:2]
         rvals, tvals = rvals.flatten(), tvals.flatten()
         dvals, rvals, tvals = dvals[:, mask].T, rvals[mask], tvals[mask]
@@ -1574,8 +1622,9 @@ class imagecube(object):
 
     def get_mask(self, r_min=None, r_max=None, exclude_r=False, PA_min=None,
                  PA_max=None, exclude_PA=False, abs_PA=False,
-                 mask_frame='disk', x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
-                 psi=1.0, z1=0.0, phi=1.0, z_func=None, shadowed=False):
+                 mask_frame='disk', x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=None,
+                 psi=None, r_cavity=None, r_taper=None, q_taper=None, z1=None,
+                 phi=None, z_func=None, shadowed=False):
         """
         Returns a 2D mask for pixels in the given region. The mask can be
         specified in either disk-centric coordinates, ``mask_frame='disk'``,
@@ -1629,6 +1678,7 @@ class imagecube(object):
 
         # Remove coordinates if in sky-frame.
         if mask_frame == 'sky':
+            r_cavity = 0.0
             inc, PA = 0.0, 0.0
             z0, psi = 0.0, 1.0
             z1, phi = 0.0, 1.0
@@ -1636,7 +1686,9 @@ class imagecube(object):
 
         # Calculate pixel coordaintes.
         rvals, tvals = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
-                                        psi=psi, z1=z1, phi=phi, z_func=z_func,
+                                        psi=psi, z1=z1, phi=phi,
+                                        r_cavity=r_cavity, r_taper=r_taper,
+                                        q_taper=q_taper, z_func=z_func,
                                         frame='cylindrical',
                                         shadowed=shadowed)[:2]
         tvals = abs(tvals) if abs_PA else tvals
@@ -1702,9 +1754,10 @@ class imagecube(object):
             rvals = np.average([rbins[1:], rbins[:-1]], axis=0)
         return rbins, rvals
 
-    def background_residual(self, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
-                            psi=0.0, z1=0.0, phi=0.0, z_func=None, r_min=None,
-                            r_max=None, PA_min=None, PA_max=None,
+    def background_residual(self, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=None,
+                            psi=None, r_cavity=None, r_taper=None,
+                            q_taper=None, z1=None, phi=None, z_func=None,
+                            r_min=None, r_max=None, PA_min=None, PA_max=None,
                             exclude_PA=False, abs_PA=False, mask_frame='disk',
                             interp1d_kw=None, background_only=False,
                             shadowed=False):
@@ -1775,6 +1828,8 @@ class imagecube(object):
         # Make the azimuthal profile.
         x, y, _ = self.radial_profile(x0=x0, y0=y0, inc=inc, PA=PA,
                                       z0=z0, phi=phi, z1=z1, psi=psi,
+                                      r_cavity=r_cavity, r_taper=r_taper,
+                                      q_taper=q_taper,
                                       z_func=z_func, r_min=r_min, r_max=r_max,
                                       PA_min=PA_min, PA_max=PA_max,
                                       exclude_PA=exclude_PA, abs_PA=abs_PA,
@@ -1790,6 +1845,8 @@ class imagecube(object):
         # Return the residual (or background if requested).
         background = avg(self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA,
                                           z0=z0, phi=phi, z1=z1, psi=psi,
+                                          r_cavity=r_cavity, r_taper=r_taper,
+                                          q_taper=q_taper,
                                           z_func=z_func, shadowed=shadowed)[0])
         return background if background_only else self.data - background
 
@@ -1853,6 +1910,15 @@ class imagecube(object):
         surfaces to be included. If this is provided, the other height
         parameters are ignored.
 
+        In some cases, the projection of the emission surface can lead to
+        regions of the disk being 'shadowed' by itself along the line of sight
+        to the observer. The default method for calculating the disk
+        coordinates does not take this into account in preference to speed. If
+        you work with some emission surface that suffers from this, you can use
+        the ``shadowed=True`` argument which will use a more precise method to
+        calculate the disk coordinates. This can be much slower for large cubes
+        as it requires rotating large grids.
+
         Args:
             x0 (Optional[float]): Source right ascension offset [arcsec].
             y0 (Optional[float]): Source declination offset [arcsec].
@@ -1863,6 +1929,12 @@ class imagecube(object):
             z0 (Optional[float]): Aspect ratio at 1" for the emission surface.
                 To get the far side of the disk, make this number negative.
             psi (Optional[float]): Flaring angle for the emission surface.
+            r_cavity (Optional[float]): Edge of the inner cavity for the
+                emission surface in [arcsec].
+            r_taper (Optional[float]): Characteristic radius in [arcsec] of the
+                exponential taper to the emission surface.
+            q_taper (Optional[float]): Exponent of the exponential taper of the
+                emission surface.
             z1 (Optional[float]): Aspect ratio correction term at 1" for the
                 emission surface. Should be opposite sign to ``z0``.
             phi (Optional[float]): Flaring angle correction term for the
@@ -1870,8 +1942,15 @@ class imagecube(object):
             z_func (Optional[function]): A function which provides
                 :math:`z(r)`. Note that no checking will occur to make sure
                 this is a valid function.
+            force_positive_surface (Optional[bool]): Force the emission surface
+                to be positive, default is ``True``.
+            force_negative_surface (Optioanl[bool]): Force the emission surface
+                to be negative, default is ``False``.
             frame (Optional[str]): Frame of reference for the returned
                 coordinates. Either ``'polar'`` or ``'cartesian'``.
+            shadowed (Optional[bool]): Use a slower, but more precise, method
+                for deprojecting the pixel coordinates if the emission surface
+                is shadowed.
 
         Returns:
             Three coordinate arrays, either the cylindrical coordaintes,
@@ -1912,11 +1991,11 @@ class imagecube(object):
         if force_positive_surface and force_negative_surface:
             raise ValueError("Cannot force positive and negative surface.")
         if force_positive_surface:
-            z_min, z_max = 0.0, None
+            z_min, z_max = 0.0, 1e10
         elif force_negative_surface:
-            z_min, z_max = None, 0.0
+            z_min, z_max = -1e10, 0.0
         else:
-            z_min, z_max = None, None
+            z_min, z_max = -1e10, 1e10
 
         # Define the emission surface function.
         if z_func is None:
@@ -2438,8 +2517,9 @@ class imagecube(object):
             return rvals, phi
         return rvals * np.cos(phi), rvals * np.sin(phi)
 
-    def disk_to_sky(self, coords, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0,
-                    psi=1.0, z1=0.0, phi=0.0, z_func=None, return_idx=False,
+    def disk_to_sky(self, coords, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=None,
+                    psi=None, r_cavity=None, r_taper=None, q_taper=None,
+                    z1=None, phi=None, z_func=None, return_idx=False,
                     frame_in='cylindrical', shadowed=False):
         """
         For a given disk midplane coordinate, either (r, theta) or (x, y),
@@ -2499,7 +2579,10 @@ class imagecube(object):
 
         xdisk_grid, ydisk_grid = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA,
                                                   z0=z0, psi=psi, z1=z1,
-                                                  phi=phi, z_func=z_func,
+                                                  phi=phi, r_cavity=r_cavity,
+                                                  r_taper=r_taper,
+                                                  q_taper=q_taper,
+                                                  z_func=z_func,
                                                   frame='cartesian',
                                                   shadowed=shadowed)[:2]
         xdisk_grid, ydisk_grid = xdisk_grid.flatten(), ydisk_grid.flatten()
@@ -2568,12 +2651,13 @@ class imagecube(object):
         self._plot_beam(ax=ax)
 
     def plot_teardrop(self, inc, PA, mstar, dist, ax=None, rvals=None,
-                      rbins=None, dr=None, x0=0.0, y0=0.0, z0=0.0, psi=1.0,
-                      z1=0.0, phi=0.0, z_func=None, resample=1,
-                      beam_spacing=False, r_min=None, r_max=None,
-                      PA_min=None, PA_max=None, exclude_PA=False, abs_PA=False,
-                      mask_frame='disk', mask=None, unit='Jy/beam',
-                      pcolormesh_kwargs=None, shadowed=False):
+                      rbins=None, dr=None, x0=0.0, y0=0.0, z0=None, psi=None,
+                      r_cavity=None, r_taper=None, q_taper=None, z1=None,
+                      phi=None, z_func=None, resample=1, beam_spacing=False,
+                      r_min=None, r_max=None, PA_min=None, PA_max=None,
+                      exclude_PA=False, abs_PA=False, mask_frame='disk',
+                      mask=None, unit='Jy/beam', pcolormesh_kwargs=None,
+                      shadowed=False):
         """
         Make a `teardrop` plot. For argument descriptions see
         ``radial_spectra``. For all properties related to ``pcolormesh``,
@@ -2589,7 +2673,8 @@ class imagecube(object):
         # Grab the spectra.
         out = self.radial_spectra(rbins=rbins, rvals=rvals, dr=dr, x0=x0,
                                   y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
-                                  phi=phi, z_func=z_func, mstar=mstar,
+                                  phi=phi, r_cavity=r_cavity, r_taper=r_taper,
+                                  q_taper=q_taper, z_func=z_func, mstar=mstar,
                                   dist=dist, resample=resample,
                                   beam_spacing=beam_spacing, r_min=r_min,
                                   r_max=r_max, PA_min=PA_min, PA_max=PA_max,
@@ -2635,7 +2720,8 @@ class imagecube(object):
     def plot_mask(self, ax, r_min=None, r_max=None, exclude_r=False,
                   PA_min=None, PA_max=None, exclude_PA=False, abs_PA=False,
                   mask_frame='disk', mask=None, x0=0.0, y0=0.0, inc=0.0,
-                  PA=0.0, z0=0.0, psi=1.0, z1=0.0, phi=1.0, z_func=None,
+                  PA=0.0, z0=None, psi=None, r_cavity=None, r_taper=None,
+                  q_taper=None, z1=None, phi=None, z_func=None,
                   mask_color='k', mask_alpha=0.5, contour_kwargs=None,
                   contourf_kwargs=None, shadowed=False):
         """
@@ -2694,7 +2780,9 @@ class imagecube(object):
                                  exclude_PA=exclude_PA, abs_PA=abs_PA,
                                  mask_frame=mask_frame, x0=x0, y0=y0, inc=inc,
                                  PA=PA, z0=z0, psi=psi, z1=z1, phi=phi,
-                                 z_func=z_func, shadowed=shadowed)
+                                 r_cavity=r_cavity, r_taper=r_taper,
+                                 q_taper=q_taper, z_func=z_func,
+                                 shadowed=shadowed)
         assert mask.shape[0] == self.yaxis.size, "Wrong y-axis shape for mask."
         assert mask.shape[1] == self.xaxis.size, "Wrong x-axis shape for mask."
 
