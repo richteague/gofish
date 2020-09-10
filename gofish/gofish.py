@@ -1795,31 +1795,63 @@ class imagecube(object):
 
     # -- Deprojection Functions -- #
 
-    def disk_coords(self, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=0.0,
-                    z1=0.0, phi=0.0, z_func=None, frame='cylindrical',
+    def disk_coords(self, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=None, psi=None,
+                    r_cavity=None, r_taper=None, q_taper=None, z1=None,
+                    phi=None, z_func=None, force_positive_surface=True,
+                    force_negative_surface=False, frame='cylindrical',
                     shadowed=False, extend=2.0, oversample=2.0,
                     griddata_kw=None):
         r"""
         Get the disk coordinates given certain geometrical parameters and an
-        emission surface. The emission surface is parameterized as a powerlaw
-        profile:
+        emission surface. The emission surface is most simply described as a
+        power law profile,
+
+        .. math::
+
+            z(r) = z_0 \times \left(\frac{r}{1^{\prime\prime}}\right)^{\psi}
+
+        where ``z0`` and ``psi`` can be provided by the user. With the increase
+        in spatial resolution afforded by interferometers such as ALMA there
+        are a couple of modifications that can be used to provide a better
+        match to the data.
+
+        An inner cavity can be included with the ``r_cavity`` argument which
+        makes the transformation:
+
+        .. math::
+
+            \tilde{r} = {\rm max}(0, r - r_{\rm cavity})
+
+        Note that the inclusion of a cavity will mean that other parameters,
+        such as ``z0``, would need to change as the radial axis has effectively
+        been shifted.
+
+        To account for the drop in emission surface in the outer disk where the
+        gas surface density decreases there are two descriptions. The preferred
+        way is to include an exponential taper to the power law profile,
+
+        .. math::
+
+            z_{\rm tapered}(r) = z(r) \times \exp\left( -\left[
+            \frac{r}{r_{\rm taper}} \right]^{q_{\rm taper}} \right)
+
+        where both ``r_taper`` and ``q_taper`` values must be set.
+        Alternatively you can use a second power law profile,
 
         .. math::
 
             z(r) = z_0 \times \left(\frac{r}{1^{\prime\prime}}\right)^{\psi} +
             z_1 \times \left(\frac{r}{1^{\prime\prime}}\right)^{\varphi}
 
-        Where both ``z0`` and ``z1`` are given in [arcsec]. For a razor thin
-        disk, ``z0=0.0``, while for a conical disk, as described in `Rosenfeld
-        et al. (2013)`_, ``psi=1.0``. Typically ``z1`` is not needed unless the
-        data is exceptionally high SNR and well spatially resolved.
+        again where both ``z1`` and ``phi`` must be specified. While it is
+        possible to combine the double power law profile with the exponential
+        taper, this is not advised due to the large degeneracy between some of
+        the arguments.
 
         It is also possible to override this parameterization and directly
         provide a user-defined ``z_func``. This allow for highly complex
         surfaces to be included. If this is provided, the other height
         parameters are ignored.
-
-        .. _Rosenfeld et al. (2013): https://ui.adsabs.harvard.edu/abs/2013ApJ...774...16R/
 
         Args:
             x0 (Optional[float]): Source right ascension offset [arcsec].
@@ -1856,15 +1888,43 @@ class imagecube(object):
         # Apply the inclination concention.
         inc = inc if inc < 90.0 else inc - 180.0
 
-        # Define the emission surface function. Either use the simple double
-        # power-law profile or the user-provied function.
+        # Check that the necessary pairs are provided.
+        msg = "Must specify either both or neither of `{}` and `{}`."
+        if (z0 is not None) != (psi is not None):
+            raise ValueError(msg.format('z0', 'psi'))
+        if (z1 is not None) != (phi is not None):
+            raise ValueError(msg.format('z1', 'phi'))
+        if (r_taper is not None) != (q_taper is not None):
+            raise ValueError(msg.format('r_taper', 'q_taper'))
+        if (z1 is not None) and (r_taper is not None) and self.verbose:
+            print("WARNING: Use a double power law with a tapered edge is not "
+                  + "advised due to large degeneracies.")
 
+        # Set the defaults.
+        z0 = 0.0 if z0 is None else z0
+        psi = 1.0 if psi is None else psi
+        z1 = 0.0 if z1 is None else z1
+        phi = 1.0 if phi is None else phi
+        r_taper = np.inf if r_taper is None else r_taper
+        q_taper = 1.0 if q_taper is None else q_taper
+        r_cavity = 0.0 if r_cavity is None else r_cavity
+
+        if force_positive_surface and force_negative_surface:
+            raise ValueError("Cannot force positive and negative surface.")
+        if force_positive_surface:
+            z_min, z_max = 0.0, None
+        elif force_negative_surface:
+            z_min, z_max = None, 0.0
+        else:
+            z_min, z_max = None, None
+
+        # Define the emission surface function.
         if z_func is None:
-            def z_func(r):
+            def z_func(r_in):
+                r = np.clip(r_in - r_cavity, a_min=0.0, a_max=None)
                 z = z0 * np.power(r, psi) + z1 * np.power(r, phi)
-                if z0 >= 0.0:
-                    return np.clip(z, a_min=0.0, a_max=None)
-                return np.clip(z, a_min=None, a_max=0.0)
+                z *= np.exp(-np.power(r / r_taper, q_taper))
+                return np.clip(z, a_min=z_min, a_max=z_max)
 
         # Calculate the pixel values.
         if shadowed:
