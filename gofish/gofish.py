@@ -971,7 +971,7 @@ class imagecube(object):
         # those channels are included.
 
         va, vb = self._parse_channel(velo_range)
-        velax = velax[va:vb]
+        velax = velax[va:vb+1]
         spectra = spectra[:, va:vb+1]
         scatter = scatter[:, va:vb+1]
 
@@ -1155,7 +1155,7 @@ class imagecube(object):
 
     def shifted_cube(self, inc, PA, x0=0.0, y0=0.0, z0=None, psi=None,
                      r_cavity=None, r_taper=None, q_taper=None, z1=None,
-                     phi=None, z_func=None, mstar=None, dist=None, v0=None,
+                     phi=None, z_func=None, mstar=None, dist=None, vmod=None,
                      r_min=None, r_max=None, fill_val=np.nan, save=False,
                      shadowed=False):
         """
@@ -1202,8 +1202,8 @@ class imagecube(object):
         mask = np.logical_and(rvals >= r_min, rvals <= r_max)
 
         # Projected velocity.
-        if (mstar is not None) and (v0 is not None):
-            raise ValueError("Only specify `mstar` and `dist` or `v0`.")
+        if (mstar is not None) and (vmod is not None):
+            raise ValueError("Only specify `mstar` and `dist` or `vmod`.")
         if mstar is not None:
             if dist is None:
                 raise ValueError("Must specify `dist` with `mstar`.")
@@ -1212,11 +1212,9 @@ class imagecube(object):
                                    r_cavity=r_cavity, r_taper=r_taper,
                                    q_taper=q_taper, z_func=z_func)
             vmod *= np.cos(tvals)
-        elif v0 is not None:
-            vmod = v0(rvals)
-        else:
-            raise ValueError("Must specify either `mstar` and `dist` or `v0`.")
-        if vmod.shape != mask.shape:
+        elif vmod is None:
+            raise ValueError("Must specify `mstar` and `dist` or `vmod`.")
+        if vmod.shape != rvals.shape:
             raise ValueError("Velocity map incorrect shape.")
 
         # Shift each pixel.
@@ -1235,7 +1233,7 @@ class imagecube(object):
                 output = save
             else:
                 output = self.path.replace('.fits', '_shifted.fits')
-            fits.writeto(output, shifted, self.header)
+            fits.writeto(output, shifted.astype('float32'), self.header)
         return shifted
 
     def find_center(self, dx=None, dy=None, Nx=None, Ny=None, mask=None,
@@ -2520,7 +2518,8 @@ class imagecube(object):
     def disk_to_sky(self, coords, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=None,
                     psi=None, r_cavity=None, r_taper=None, q_taper=None,
                     z1=None, phi=None, z_func=None, return_idx=False,
-                    frame_in='cylindrical', shadowed=False):
+                    frame_in='cylindrical', shadowed=False,
+                    force_negative_surface=False, force_positive_surface=True):
         """
         For a given disk midplane coordinate, either (r, theta) or (x, y),
         return interpolated sky coordiantes in (x, y) for plotting. The input
@@ -2577,16 +2576,15 @@ class imagecube(object):
 
         # Grab disk coordinates and sky coordinates to interpolate between.
 
-        xdisk_grid, ydisk_grid = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA,
-                                                  z0=z0, psi=psi, z1=z1,
-                                                  phi=phi, r_cavity=r_cavity,
-                                                  r_taper=r_taper,
-                                                  q_taper=q_taper,
-                                                  z_func=z_func,
-                                                  frame='cartesian',
-                                                  shadowed=shadowed)[:2]
+        out = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA, z0=z0, psi=psi,
+                               z1=z1, phi=phi, r_cavity=r_cavity,
+                               r_taper=r_taper, q_taper=q_taper, z_func=z_func,
+                               shadowed=shadowed, frame='cartesian',
+                               force_negative_surface=force_negative_surface,
+                               force_positive_surface=force_positive_surface)
+        xdisk_grid, ydisk_grid, _ = out
         xdisk_grid, ydisk_grid = xdisk_grid.flatten(), ydisk_grid.flatten()
-        xsky_grid, ysky_grid = self._get_cart_sky_coords(x0=x0, y0=y0)
+        xsky_grid, ysky_grid = self._get_cart_sky_coords(x0=0.0, y0=0.0)
         xsky_grid, ysky_grid = xsky_grid.flatten(), ysky_grid.flatten()
 
         xsky = griddata((xdisk_grid, ydisk_grid), xsky_grid, (xdisk, ydisk),
