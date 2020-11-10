@@ -1852,7 +1852,7 @@ class imagecube(object):
 
     def disk_coords(self, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=None, psi=None,
                     r_cavity=None, r_taper=None, q_taper=None, z1=None,
-                    phi=None, z_func=None, force_positive_surface=True,
+                    phi=None, z_func=None, force_positive_surface=False,
                     force_negative_surface=False, frame='cylindrical',
                     shadowed=False, extend=2.0, oversample=2.0,
                     griddata_kw=None):
@@ -1941,7 +1941,7 @@ class imagecube(object):
                 :math:`z(r)`. Note that no checking will occur to make sure
                 this is a valid function.
             force_positive_surface (Optional[bool]): Force the emission surface
-                to be positive, default is ``True``.
+                to be positive, default is ``False``.
             force_negative_surface (Optioanl[bool]): Force the emission surface
                 to be negative, default is ``False``.
             frame (Optional[str]): Frame of reference for the returned
