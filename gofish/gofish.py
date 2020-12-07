@@ -31,6 +31,12 @@ class imagecube(object):
 
     def __init__(self, path, FOV=None, velocity_range=None, verbose=True,
                  clip=None, primary_beam=None):
+
+        # Default parameters for user-defined values.
+        self._user_velocity_scale = None
+        self._user_pixel_scale = None
+
+        # Read in the FITS data.
         self._read_FITS(path)
         self.verbose = verbose
 
@@ -2172,7 +2178,11 @@ class imagecube(object):
         self.header = fits.getheader(path)
         self.data = np.squeeze(fits.getdata(self.path))
         self.data = np.where(np.isfinite(self.data), self.data, 0.0)
-        self.bunit = self.header['bunit']
+        try:
+            self.bunit = self.header['bunit']
+        except KeyError:
+            print("WARNING: Not `bunit` header keyword found.")
+            self.bunit = input("\t Enter brightness unit: ")
 
         # Position axes.
         self.xaxis = self._readpositionaxis(a=1)
@@ -2227,12 +2237,17 @@ class imagecube(object):
             self.beamarea_arcsec = self._calculate_beam_area_arcsec()
             self.beamarea_str = self._calculate_beam_area_str()
         except Exception:
-            print("WARNING: No beam values found. Assuming Jy/pix units.")
+            print("WARNING: No beam values found. Assuming pixel as beam.")
             self.bmaj = self.dpix
             self.bmin = self.dpix
             self.bpa = 0.0
             self.beamarea_arcsec = self.dpix**2.0
             self.beamarea_str = np.radians(self.dpix / 3600.)**2.0
+        self.bpa %= 180.0
+
+    def print_beam(self):
+        """Print the beam properties."""
+        print('{:.2f}" x {:.2f}" at {:.1f} deg'.format(*self.beam))
 
     @property
     def beam(self):
@@ -2295,10 +2310,22 @@ class imagecube(object):
     def _readpositionaxis(self, a=1):
         """Returns the position axis in [arcseconds]."""
         if a not in [1, 2]:
-            raise ValueError("'a' must be in [0, 1].")
-        a_len = self.header['naxis%d' % a]
-        a_del = self.header['cdelt%d' % a]
-        a_pix = self.header['crpix%d' % a] - 0.5
+            raise ValueError("'a' must be in [1, 2].")
+        try:
+            a_len = self.header['naxis%d' % a]
+            a_del = self.header['cdelt%d' % a]
+            a_pix = self.header['crpix%d' % a] - 0.5
+        except KeyError:
+            if self._user_pixel_scale is None:
+                print('WARNING: No axis information found.')
+                _input = input("\t Enter pixel scale size in [arcsec]: ")
+                self._user_pixel_scale = float(_input) / 3600.0
+            a_len = self.data.shape[-1] if a == 1 else self.data.shape[-2]
+            if a == 1:
+                a_del = -1.0 * self._user_pixel_scale
+            else:
+                a_del = 1.0 * self._user_pixel_scale
+            a_pix = a_len / 2.0 + 0.5
         axis = (np.arange(a_len) - a_pix + 1.0) * a_del
         return 3600 * axis
 
@@ -2414,10 +2441,30 @@ class imagecube(object):
 
     # -- Utilities -- #
 
-    def estimate_RMS(self, N=5):
-        """Estimate RMS of the cube based on first and last `N` channels."""
+    def estimate_RMS(self, N=5, r_in=0.0, r_out=1e10):
+        """
+        Estimate RMS of the cube based on first and last `N` channels and a
+        circular area described by an inner and outer radius.
+
+        Args:
+            N (int): Number of edge channels to include.
+            r_in (float): Inner edge of pixels to consider in [arcsec].
+            r_out (float): Outer edge of pixels to consider in [arcsec].
+
+        Returns:
+            RMS (float): The RMS based on the requested pixel range.
+        """
+        r_dep = np.hypot(self.xaxis[None, :], self.yaxis[:, None])
+        rmask = np.logical_and(r_dep >= r_in, r_dep <= r_out)
         rms = np.concatenate([self.data[:int(N)], self.data[-int(N):]])
-        return np.sqrt(np.sum(rms**2) / rms.size)
+        rms = np.where(rmask[None, :, :], rms, np.nan)
+        return np.sqrt(np.nansum(rms**2) / np.sum(np.isfinite(rms)))
+
+    def print_RMS(self, N=5, r_in=0.0, r_out=1e10):
+        """Print the estimated RMS."""
+        rms = self.estimate_RMS(N, r_in, r_out)
+        rms_K = self.jybeam_to_Tb_RJ(rms)
+        print('{:.2f} mJy/beam ({:.2f} K)'.format(rms * 1e3, rms_K))
 
     def correct_PB(self, path):
         """Correct for the primary beam given by ``path``."""
