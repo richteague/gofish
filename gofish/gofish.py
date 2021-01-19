@@ -24,17 +24,24 @@ class imagecube(object):
         verbose (Optional[bool]): Whether to print out warning messages.
         primary_beam (Optional[str]): Path to the primary beam as a FITS file
             to apply the correction.
+        bunit (Optional[str]): If no `bunit` header keyword is found, use this
+            value, e.g., 'Jy/beam'.
+        pixel_scale (Optional[float]): If no axis information is found in the
+            header, use this value for the pixel scaling in [arcsec], assuming
+            an image centered on 0.0".
     """
 
     frequency_units = {'GHz': 1e9, 'MHz': 1e6, 'kHz': 1e3, 'Hz': 1e0}
     velocity_units = {'km/s': 1e3, 'm/s': 1e0}
 
     def __init__(self, path, FOV=None, velocity_range=None, verbose=True,
-                 clip=None, primary_beam=None):
+                 clip=None, primary_beam=None, bunit=None, pixel_scale=None):
 
         # Default parameters for user-defined values.
-        self._user_velocity_scale = None
-        self._user_pixel_scale = None
+        self._user_bunit = bunit
+        self._user_pixel_scale = pixel_scale
+        if self._user_pixel_scale is not None:
+            self._user_pixel_scale /= 3600.0
 
         # Read in the FITS data.
         self._read_FITS(path)
@@ -253,10 +260,26 @@ class imagecube(object):
                 continue
 
             # Deproject the spectrum currently using a simple bin average.
+            # The try / except loop is that when masking the spectrum values
+            # are converted to NaNs which look like pixels in the calculation
+            # of the annulus, but then cannot be binned.
 
-            x, y, dy = annulus.deprojected_spectrum(vrot=v_kep[ridx],
-                                                    resample=resample,
-                                                    scatter=True)
+            try:
+                x, y, dy = annulus.deprojected_spectrum(vrot=v_kep[ridx],
+                                                        resample=resample,
+                                                        scatter=True)
+            except ValueError:
+                msg = "No finite pixels between {:.2f} ".format(rbins[ridx])
+                msg += "and {:.2f} arcsec.".format(rbins[ridx+1])
+                if not skip_empty_annuli:
+                    raise ValueError(msg)
+                else:
+                    included[ridx] = 0
+                    if self.verbose:
+                        print("WARNING: " + msg + " Skipping annulus.")
+                continue
+
+
             x_arr += [x]    # velocity axis
             y_arr += [y]    # deprojected spectrum
             dy_arr += [dy]  # error on the mean
@@ -2181,8 +2204,11 @@ class imagecube(object):
         try:
             self.bunit = self.header['bunit']
         except KeyError:
-            print("WARNING: Not `bunit` header keyword found.")
-            self.bunit = input("\t Enter brightness unit: ")
+            if self._user_bunit is not None:
+                self.bunit = self._user_bunit
+            else:
+                print("WARNING: Not `bunit` header keyword found.")
+                self.bunit = input("\t Enter brightness unit: ")
 
         # Position axes.
         self.xaxis = self._readpositionaxis(a=1)
