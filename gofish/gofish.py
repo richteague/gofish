@@ -2302,28 +2302,32 @@ class imagecube(object):
 
     def _clip_cube_spatial(self, radius):
         """Clip the cube plus or minus clip arcseconds from the origin."""
-        xa = abs(self.xaxis - radius).argmin()
-        if self.xaxis[xa] < radius:
-            xa -= 1
-        xb = abs(self.xaxis + radius).argmin()
-        if -self.xaxis[xb] < radius:
-            xb += 1
-        xb += 1
-        ya = abs(self.yaxis + radius).argmin()
-        if -self.yaxis[ya] < radius:
-            ya -= 1
-        yb = abs(self.yaxis - radius).argmin()
-        if self.yaxis[yb] < radius:
-            yb += 1
-        yb += 1
-        if self.data.ndim == 3:
-            self.data = self.data[:, ya:yb, xa:xb]
+        if radius < min(self.xaxis.max(), self.yaxis.max()):
+            if self.verbose:
+                print("WARNING: `FOV` larger than input field of view.")
         else:
-            self.data = self.data[ya:yb, xa:xb]
-        self.xaxis = self.xaxis[xa:xb]
-        self.yaxis = self.yaxis[ya:yb]
-        self.nxpix = self.xaxis.size
-        self.nypix = self.yaxis.size
+            xa = abs(self.xaxis - radius).argmin()
+            if self.xaxis[xa] < radius:
+                xa -= 1
+            xb = abs(self.xaxis + radius).argmin()
+            if -self.xaxis[xb] < radius:
+                xb += 1
+            xb += 1
+            ya = abs(self.yaxis + radius).argmin()
+            if -self.yaxis[ya] < radius:
+                ya -= 1
+            yb = abs(self.yaxis - radius).argmin()
+            if self.yaxis[yb] < radius:
+                yb += 1
+            yb += 1
+            if self.data.ndim == 3:
+                self.data = self.data[:, ya:yb, xa:xb]
+            else:
+                self.data = self.data[ya:yb, xa:xb]
+            self.xaxis = self.xaxis[xa:xb]
+            self.yaxis = self.yaxis[ya:yb]
+            self.nxpix = self.xaxis.size
+            self.nypix = self.yaxis.size
 
     def _readspectralaxis(self, a):
         """Returns the spectral axis in [Hz] or [m/s]."""
