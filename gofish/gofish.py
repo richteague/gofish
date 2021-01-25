@@ -2302,7 +2302,7 @@ class imagecube(object):
 
     def _clip_cube_spatial(self, radius):
         """Clip the cube plus or minus clip arcseconds from the origin."""
-        if radius < min(self.xaxis.max(), self.yaxis.max()):
+        if radius > min(self.xaxis.max(), self.yaxis.max()):
             if self.verbose:
                 print("WARNING: `FOV` larger than input field of view.")
         else:
