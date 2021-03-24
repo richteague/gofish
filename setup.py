@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
     name="gofish",
-    version="1.3.3",
+    version="1.3.4",
     author="Richard Teague",
     author_email="richard.d.teague@cfa.harvard.edu",
     description="Fishing for molecular line emission in protoplanetary disks.",
@@ -17,5 +17,6 @@ setuptools.setup(
         "numpy",
         "astropy",
         "scipy",
+        "matplotlib>=3.3.4"
       ]
 )

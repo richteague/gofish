@@ -60,6 +60,7 @@ class imagecube(object):
             self._clip_cube_spatial(FOV/2.0)
         if velocity_range is not None:
             self._clip_cube_velocity(*velocity_range)
+        self._velax_offset = self._calculate_symmetric_velocity_axis()
         if self.data.ndim != 3 and self.verbose:
             print("WARNING: Provided cube is only 2D. Shifting not available.")
 
@@ -72,8 +73,10 @@ class imagecube(object):
                          q_taper=None, z1=None, phi=None, z_func=None,
                          mstar=1.0, dist=100., resample=1, beam_spacing=False,
                          mask_frame='disk', unit='Jy/beam', mask=None,
-                         assume_correlated=True, skip_empty_annuli=True,
-                         shadowed=False, empirical_uncertainty=False):
+                         skip_empty_annuli=True,
+                         shadowed=False, empirical_uncertainty=False,
+                         include_spectral_decorrlation=True,
+                         velocity_resolution=1.0):
         """
         Return the averaged spectrum over a given radial range, returning a
         spectrum in units of [Jy/beam] or [K] using the Rayleigh-Jeans
@@ -163,6 +166,12 @@ class imagecube(object):
             empirical_uncertainty (Optional[bool]): If ``True``, use an
                 empirical measure of the uncertainty based on an iterative
                 sigma clipping described in ``imagecube.estimate_uncertainty``.
+            include_spectral_decorrlation (Optional[bool]): If ``True``, take
+                account of the spectral decorrelation when estimating
+                uncertainties on the average spectrum and return a spectral
+                correlation length too. Defaults to ``True``.
+            velocity_resolution (Optional[float]): Velocity resolution of the
+                data as a fraction of the channel spacing. Defaults to ``1.0``.
 
         Returns:
             The velocity axis of the spectrum, ``velax``, in [m/s], the
@@ -225,11 +234,50 @@ class imagecube(object):
         else:
             user_mask = np.ones(self.data[0].shape)
 
+        # Calculate the number of independent samples for each pixel after
+        # accounting for the spectral deprojection of the data. This is based
+        # on a similar approach to Yen et al. (2016), but performed
+        # numerically such that we can a) take account of any masks and b)
+        # estimate the introduced spectral correlation.
+
+        if include_spectral_decorrlation and not empirical_uncertainty:
+            v0_map = self.keplerian(
+                inc=inc,
+                PA=PA,
+                mstar=mstar,
+                dist=dist,
+                x0=x0,
+                y0=y0,
+                vlsr=0.0,
+                z0=z0,
+                psi=psi,
+                r_cavity=r_cavity,
+                r_taper=r_taper,
+                q_taper=q_taper,
+                z1=z1,
+                phi=phi,
+                z_func=z_func,
+                r_min=r_min,
+                r_max=r_max,
+                cylindrical=False,
+                shadowed=shadowed,
+                )
+
+            samples = self._independent_samples(
+                v0_map=v0_map,
+                mask=user_mask,
+                velocity_resolution=velocity_resolution,
+                plot=False,
+                ignore_spectral_correlation=True,
+                )
+        else:
+            samples = self.beams_per_pix
+
         # Get the deprojected spectrum for each annulus (or rval). We include
         # an array to describe whether an annulus is included in the average or
         # not in order to rescale the uncertainties.
 
-        x_arr, y_arr, dy_arr, npix_arr = [], [], [], []
+        x_arr, y_arr, dy_arr, nbeams = [], [], [], []
         included = np.ones(rvals.size).astype('int')
 
         for ridx in range(rvals.size):
@@ -249,8 +297,9 @@ class imagecube(object):
             # Complain if no spectra are found in the annulus.
 
             except ValueError:
-                msg = "No pixels found between {:.2f} ".format(rbins[ridx])
-                msg += "and {:.2f} arcsec.".format(rbins[ridx+1])
+                msg = "No finite pixels found between"
+                msg += " {:.2f} and".format(rbins[ridx])
+                msg += " {:.2f} arcsec.".format(rbins[ridx+1])
                 if not skip_empty_annuli:
                     raise ValueError(msg)
                 else:
@@ -260,17 +309,19 @@ class imagecube(object):
                 continue
 
             # Deproject the spectrum currently using a simple bin average.
-            # The try / except loop is that when masking the spectrum values
+            # The try / except loop is that when masking, the spectrum values
             # are converted to NaNs which look like pixels in the calculation
             # of the annulus, but then cannot be binned.
+            # TODO: See if there's a better way to combine these two checks.
 
             try:
                 x, y, dy = annulus.deprojected_spectrum(vrot=v_kep[ridx],
                                                         resample=resample,
                                                         scatter=True)
             except ValueError:
-                msg = "No finite pixels between {:.2f} ".format(rbins[ridx])
-                msg += "and {:.2f} arcsec.".format(rbins[ridx+1])
+                msg = "No finite pixels found between"
+                msg += " {:.2f} and".format(rbins[ridx])
+                msg += " {:.2f} arcsec.".format(rbins[ridx+1])
                 if not skip_empty_annuli:
                     raise ValueError(msg)
                 else:
@@ -279,23 +330,24 @@ class imagecube(object):
                         print("WARNING: " + msg + " Skipping annulus.")
                 continue
 
-
             x_arr += [x]    # velocity axis
             y_arr += [y]    # deprojected spectrum
             dy_arr += [dy]  # error on the mean
 
             # Calculate the number of pixels within the mask. This is combined
-            # with the `user_mask` which is the 2D projection of the user
-            # provided mask which any spectrum contains a finite value.
+            # with the independent sampels based on the spectral decorrelation.
+            # TODO: Check that the user mask is doing what I think it is...
 
-            npix = self.get_mask(rbins[ridx], rbins[ridx+1], exclude_r=False,
-                                 PA_min=PA_min, PA_max=PA_max,
-                                 exclude_PA=exclude_PA, abs_PA=abs_PA, x0=x0,
-                                 y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, z1=z1,
-                                 phi=phi, r_cavity=r_cavity, r_taper=r_taper,
-                                 q_taper=q_taper, z_func=z_func,
-                                 mask_frame=mask_frame, shadowed=shadowed)
-            npix_arr += [np.sum(npix * user_mask)]
+            annulus_mask = self.get_mask(rbins[ridx], rbins[ridx+1],
+                                         exclude_r=False, PA_min=PA_min,
+                                         PA_max=PA_max, exclude_PA=exclude_PA,
+                                         abs_PA=abs_PA, x0=x0, y0=y0, inc=inc,
+                                         PA=PA, z0=z0, psi=psi, z1=z1, phi=phi,
+                                         r_cavity=r_cavity, r_taper=r_taper,
+                                         q_taper=q_taper, z_func=z_func,
+                                         mask_frame=mask_frame,
+                                         shadowed=shadowed)
+            nbeams += [np.sum(annulus_mask * user_mask * samples)]
 
         # Return the data to it's saved state (i.e. removing the masked NaNs).
 
@@ -312,41 +364,41 @@ class imagecube(object):
                      for xx, yy in zip(x_arr, y_arr)]
             dy_arr = [interp1d(xx, dd, bounds_error=False)(x)
                       for xx, dd in zip(x_arr, dy_arr)]
-        N = np.squeeze(npix_arr) * self.dpix**2 / self.beamarea_arcsec
-
-        # I'm not sure if we need this value to account for the `beam_spacing`
-        # value used? Remove it for now...
-
-        # N = np.sqrt(N / max(1, float(beam_spacing)))
 
         # Remove any pesky NaNs.
 
         spectra = np.where(np.isfinite(y_arr), y_arr, 0.0)
-        scatter = np.where(np.isfinite(dy_arr), dy_arr, 0.0)
         if spectra.size == 0.0:
             raise ValueError("No finite spectra were returned.")
 
-        # Weight the annulus based on its area.
+        # Account for the averaging over N independent samples.
+
+        scatter = np.where(np.isfinite(dy_arr), dy_arr, 0.0)
+        scatter /= np.sqrt(nbeams)[:, None]
+        if spectra.shape != scatter.shape:
+            raise ValueError("spectra.shape != scatter.shape")
+
+        # Combine the averages, weighting each annulus based on its area.
 
         weights = np.pi * (rbins[1:]**2 - rbins[:-1]**2)
         weights = weights[included.astype('bool')]
         weights += 1e-20 * np.random.randn(weights.size)
         if weights.size != spectra.shape[0]:
-            raise ValueError("Number of weights, {:d}, ".format(weights.size)
-                             + "does not match number of spectra, "
-                             + "{:d}.".format(spectra.shape[0]))
+            raise ValueError("weights.size != spectra.shape[0]")
         spectrum = np.average(spectra, axis=0, weights=weights)
 
-        # Uncertainty propagation. Either combine all the uncertainties
-        # together assuming independent Gaussian distributions, or empirically
-        # measure it. For the former case, we can rescale by the number of
-        # independent beams in the annulus.
+        # Average over the uncertainties. If requested, override the scatter
+        # with an emperically derived value.
 
         if empirical_uncertainty:
             scatter = imagecube.estimate_uncertainty(spectrum)
+            scatter *= np.ones(x.size)
         else:
-            scatter = np.nansum((scatter * (weights / N)[:, None])**2)**0.5
-            scatter /= np.nansum(weights)
+            scatter = np.sum((weights[:, None] * scatter)**2.0, axis=0)**0.5
+            scatter /= np.sum(weights)
+        if spectrum.shape != scatter.shape:
+            print(scatter.shape, spectrum.shape)
+            raise ValueError("spectra.shape != scatter.shape")
 
         # Convert to K using RJ-approximation.
 
@@ -356,7 +408,294 @@ class imagecube(object):
         if unit[0] == 'm':
             spectrum *= 1e3
             scatter *= 1e3
+
         return x, spectrum, scatter
+
+    def _independent_samples(self, v0_map, mask=None, velocity_resolution=1.0,
+                             plot=False, ignore_spectral_correlation=True):
+        """
+        Args:
+            v0_map (arr): Array of the velocities used to decorrelate the data.
+            mask (Optional[arr]): 2D boolean mask.
+            velocity_resolution (Optional[float]): The velocity resolution as a
+                fraction of the channel spacing.
+            plot (Optional[bool]): If ``True``, make a diagnostic plot.
+            ignore_spectral_correlation (Optional[bool]): If ``True``, return
+                only the effective number of pixels in the central channel.
+
+        Returns:
+            something
+        """
+
+        # Run through each pixel calculating the independent samples.
+
+        _N = np.zeros(v0_map.shape)
+        for i in range(self.nxpix):
+            for j in range(self.nypix):
+
+                # Skip empty pixels.
+
+                if not np.isfinite(v0_map[j, i]):
+                    continue
+
+                _N[j, i] = self._pixel_independent_samples(
+                    i,
+                    j,
+                    v0_map,
+                    mask,
+                    velocity_resolution,
+                    False,
+                    True,
+                    )
+
+        if ignore_spectral_correlation:
+            effective_samples = _N
+        else:
+            c_idx = abs(self._velax_offset).argmin()
+            effective_samples = _N[:, :, c_idx]
+        effective_samples = np.clip(effective_samples, a_min=0.0, a_max=1.0)
+
+        # Calculate the spectral correlation.
+
+        if ignore_spectral_correlation:
+            spectral_correlation = 0.0
+        else:
+            _N_collapsed = np.sum(_N, axis=(0, 1))
+            _N_collapsed /= np.trapz(_N_collapsed, dx=self.chan)
+            _N_collapsed /= _N_collapsed.max()
+
+            _N_cumsum = np.cumsum(_N_collapsed)
+            _N_cumsum /= _N_cumsum[-1]
+
+            sig_a = self._velax_offset[abs(_N_cumsum - 0.16).argmin()]
+            sig_b = self._velax_offset[abs(_N_cumsum - 0.84).argmin()]
+            spectral_correlation = np.mean([abs(sig_a), abs(sig_b)])
+
+        # Diagnostic plots.
+
+        if plot:
+            import matplotlib.pyplot as plt
+            from matplotlib.ticker import MultipleLocator
+
+            fig, ax = plt.subplots()
+            _plt = np.where(effective_samples > 0.0, effective_samples, np.nan)
+            im = ax.imshow(_plt, origin='lower', extent=self.extent,
+                           cmap='turbo', vmin=0.0, vmax=1.0)
+            self.plot_beam(ax=ax, color='w')
+            cb = plt.colorbar(im, pad=0.03)
+            cb.set_label('Independent Samples per Pixel', rotation=270,
+                         labelpad=13)
+            ax.xaxis.set_major_locator(MultipleLocator(0.5))
+            ax.yaxis.set_major_locator(MultipleLocator(0.5))
+            ax.set_xlabel('Offset (arcsec)')
+            ax.set_ylabel('Offset (arcsec)')
+
+        if plot and not ignore_spectral_correlation:
+            fig, axs = plt.subplots(ncols=2, figsize=(12, 3.5))
+
+            ax = axs[0]
+            ax.axvline(0.0, ls='--', color='0.7')
+            ax.step(self._velax_offset / 1e3, _N_collapsed, where='mid')
+            ax.set_xlabel('Velocity Offset (km/s)')
+            ax.set_ylabel('Relative Correlation')
+            ax.set_xlim(-5e-3 * spectral_correlation,
+                        5e-3 * spectral_correlation)
+
+            ax = axs[1]
+            ax.axvline(0.0, ls='--', color='0.7')
+            ax.axvline(sig_a / 1e3, ls=':', color='0.7')
+            ax.axvline(sig_b / 1e3, ls=':', color='0.7')
+            ax.plot(self._velax_offset / 1e3, _N_cumsum)
+            ax.set_xlabel('Velocity Offset (km/s)')
+            ax.set_ylabel('Relative Cumulative Correlation')
+            ax.set_xlim(-5e-3 * spectral_correlation,
+                        5e-3 * spectral_correlation)
+            ax.set_ylim(-0.1, 1.1)
+            ax.text(sig_a / 1e3, 1.12, r'$-\sigma$', ha='center', va='bottom')
+            ax.text(sig_b / 1e3, 1.12, r'$+\sigma$', ha='center', va='bottom')
+
+        if ignore_spectral_correlation:
+            return effective_samples
+        else:
+            return effective_samples, spectral_correlation
+
+    def _pixel_independent_samples(self, x_idx, y_idx, v0_map, mask=None,
+                                   velocity_resolution=1.0, plot=False,
+                                   ignore_spectral_correlation=True):
+        """
+        Returns an array of the independent samples per pixel after spectral
+        decorrelation. By default, ignores where the spectral correlation goes,
+        but can be used to keep track of how pixels become spectrally
+        correlated.
+
+        Args:
+            x_idx (int): x-axis index of the pixel.
+            y_idx (int): y-axis index of the pixel.
+            v0_map (arr): Array of the velocities used to decorrelate the data.
+            mask (Optional[arr]): 2D boolean mask.
+            velocity_resolution (Optional[float]): The velocity resolution as a
+                fraction of the channel spacing.
+            plot (Optional[bool]): If ``True``, make a diagnostic plot.
+            ignore_spectral_correlation (Optional[bool]): If ``True``, return
+                only the effective number of pixels in the central channel.
+
+        Returns:
+            independent_samples (arr): The numer of effective independent
+                samples for the pixel given the provided velocity deprojection.
+        """
+
+        # Define the spatial mask. This is a combination of the the beam shape
+        # and any user-defined masks. This should result in a 2D image with
+        # values of 1.0 or 0.0 (in the mask or out the mask).
+
+        beam_mask = self._beam_mask(x_idx, y_idx)
+        user_mask = np.ones(beam_mask.shape) if mask is None else mask
+        assert beam_mask.shape == user_mask.shape, 'wrong shape for `mask`'
+        combined_mask = np.logical_and(beam_mask, user_mask).astype('float')
+        total_pixels = combined_mask.sum()
+
+        # Calculate the velocity correlation then shift the beam by this amount
+        # assumining a simple Hanning kernel and linear interpolation.
+
+        assert combined_mask.shape == v0_map.shape
+        velocity_offset = v0_map - v0_map[y_idx, x_idx]
+        if ignore_spectral_correlation:
+            channel_offset = np.array([0.0])
+        else:
+            channel_offset = self._velax_offset.copy()
+        offset = 0.5 * self.chan * velocity_resolution
+
+        # If the pixel of choice is masked then return zero.
+
+        if not user_mask[y_idx, x_idx]:
+            return np.zeros(channel_offset.shape)
+
+        kernel = channel_offset[:, None, None] - velocity_offset[None, :, :]
+        kernel = np.where(abs(kernel) <= offset, 1.0, 0.0)
+        kernel *= combined_mask[None, :, :]
+        if ignore_spectral_correlation:
+            assert kernel[0].shape == self.data[0].shape
+        else:
+            assert kernel.shape == self.data.shape
+
+        # Calculate the fraction of the beam in each covariance 'channel'.
+
+        total_correlated_pixels = np.sum(kernel, axis=(1, 2))
+        correlated_fraction = total_correlated_pixels / total_pixels
+        correlated_fraction = np.where(correlated_fraction == 0.0,
+                                       1e16, correlated_fraction)
+        independent_samples = self.beams_per_pix / correlated_fraction
+
+        # Make diagnostic plots.
+
+        if plot:
+            import matplotlib.pyplot as plt
+            from matplotlib.ticker import MultipleLocator
+            fig, axs = plt.subplots(figsize=(7, 4.5), constrained_layout=True,
+                                    gridspec_kw=dict(height_ratios=(0.07, 1)),
+                                    ncols=2, nrows=2,)
+
+            ax = axs[1, 0]
+            ax.patch.set_facecolor(plt.get_cmap('viridis')(0.0))
+            im = ax.imshow(abs(velocity_offset) / self.chan, origin='lower',
+                           extent=self.extent, cmap='viridis_r', vmax=1.0)
+            ax.set_xlim(self.xaxis[x_idx] + 1.5 * self.bmaj,
+                        self.xaxis[x_idx] - 1.5 * self.bmaj)
+            ax.set_ylim(self.yaxis[y_idx] - 1.5 * self.bmaj,
+                        self.yaxis[y_idx] + 1.5 * self.bmaj)
+            ax.xaxis.set_major_locator(MultipleLocator(0.2))
+            ax.yaxis.set_major_locator(MultipleLocator(0.2))
+            ax.set_xlabel('Offset (arcsec)')
+            ax.set_ylabel('Offset (arcsec)')
+
+            self.plot_beam(ax=ax, x0=0.5, y0=0.5, color='k')
+            if not np.all(user_mask == 1):
+                ax.contourf(self.xaxis, self.yaxis, np.where(user_mask, 1, 0),
+                            [0.0, 0.5], colors='w', alpha=0.5)
+                ax.contour(self.xaxis, self.yaxis, np.where(user_mask, 1, 0),
+                           [0.5], linewidths=1.0, colors='w')
+
+            cb = plt.colorbar(im, cax=axs[0, 0], extend='max',
+                              orientation='horizontal')
+            cb.set_label('Velocity Difference / Channel Spacing', labelpad=13)
+            cb.ax.xaxis.set_ticks_position('top')
+            cb.ax.xaxis.set_label_position('top')
+
+            axs[0, 1].axis('off')
+
+            if ignore_spectral_correlation:
+                correlated_pixels = kernel[0]
+            else:
+                correlated_pixels = kernel[abs(channel_offset).argmin()]
+
+            ax = axs[1, 1]
+            ax.imshow(np.where(beam_mask, 0.1, np.nan), vmin=0, vmax=1,
+                      origin='lower', extent=self.extent, cmap='binary')
+            ax.imshow(np.where(combined_mask, 0.5, np.nan), vmin=0, vmax=1,
+                      origin='lower', extent=self.extent, cmap='binary')
+            ax.imshow(np.where(correlated_pixels > 0.5, 0.8, np.nan), vmin=0,
+                      vmax=1, origin='lower', extent=self.extent, cmap='Reds')
+
+            if mask is None:
+                if ignore_spectral_correlation:
+                    pcnt = correlated_fraction[0]
+                else:
+                    pcnt = correlated_fraction[abs(channel_offset).argmin()]
+                pcnt *= 1e2
+                ax.text(0.05, 0.96,
+                        '{:.0f}% of beam correlated'.format(pcnt),
+                        color=plt.get_cmap('Reds')(0.8), ha='left', va='top',
+                        transform=ax.transAxes)
+            else:
+                pcnt = 1e2 * total_pixels / beam_mask.sum()
+                ax.text(0.05, 0.96,
+                        'masked beam is {:.0f}% of total beam'.format(pcnt),
+                        color='0.3', ha='left', va='top',
+                        transform=ax.transAxes)
+
+                if ignore_spectral_correlation:
+                    pcnt = correlated_fraction[0]
+                else:
+                    pcnt = correlated_fraction[abs(channel_offset).argmin()]
+                pcnt *= 1e2
+                ax.text(0.05, 0.89,
+                        '{:.0f}% of masked beam correlated'.format(pcnt),
+                        color=plt.get_cmap('Reds')(0.8), ha='left', va='top',
+                        transform=ax.transAxes)
+
+            ax.set_xlim(self.xaxis[x_idx] + 1.0 * self.bmaj,
+                        self.xaxis[x_idx] - 1.0 * self.bmaj)
+            ax.set_ylim(self.yaxis[y_idx] - 1.0 * self.bmaj,
+                        self.yaxis[y_idx] + 1.0 * self.bmaj)
+            ax.tick_params(which='both', left=0, bottom=0)
+            ax.set_xticklabels([])
+            ax.set_yticklabels([])
+
+        return np.where(independent_samples < 1e-10, 0.0, independent_samples)
+
+    def _beam_mask(self, x_idx, y_idx, threshold=0.5):
+        """
+        Returns a 2D Gaussian mask based on the attached beam centered on a
+        pixel given by [y_idx, x_idx].
+
+        Args:
+            x_idx (int): x-axis index of the pixel.
+            y_idx (int): y-axis index of the pixel.
+            threshold (Optional[float]): Threshold beam power to consider a
+                pixel within the beam. Default is 0.5.
+
+        Returns:
+            beammask (arr): 2D boolean array of pixels covered by the beam.
+        """
+        xx, yy = np.meshgrid((self.xaxis - self.xaxis[x_idx])[None, :],
+                             (self.yaxis - self.yaxis[y_idx])[:, None])
+        theta = -np.radians(self.bpa)
+        std_x = 0.5 * self.bmin / np.sqrt(np.log(2.0))
+        std_y = 0.5 * self.bmaj / np.sqrt(np.log(2.0))
+        a = np.cos(theta)**2 / std_x**2 + np.sin(theta)**2 / std_y**2
+        b = np.sin(2*theta) / std_x**2 - np.sin(2*theta) / std_y**2
+        c = np.sin(theta)**2 / std_x**2 + np.cos(theta)**2 / std_y**2
+        return np.exp(-(a*xx**2 + b*xx*yy + c*yy**2)) >= threshold
 
     @staticmethod
     def estimate_uncertainty(a, nsigma=3.0, niter=20):
@@ -399,8 +738,10 @@ class imagecube(object):
                             resample=1, beam_spacing=False, PA_min=None,
                             PA_max=None, exclude_PA=False, abs_PA=False,
                             mask=None, mask_frame='disk',
-                            assume_correlated=False, skip_empty_annuli=True,
-                            shadowed=False):
+                            empirical_uncertainty=False,
+                            skip_empty_annuli=True,
+                            shadowed=False, velocity_resolution=1.0,
+                            include_spectral_decorrlation=True):
         """
         Return the integrated spectrum over a given radial range, returning a
         spectrum in units of [Jy].
@@ -491,20 +832,39 @@ class imagecube(object):
 
         # Get average spectrum for the desired region.
 
-        x, y, dy = self.average_spectrum(r_min=r_min, r_max=r_max, dr=dr,
-                                         x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
-                                         psi=psi, z1=z1, phi=phi,
-                                         r_cavity=r_cavity, r_taper=r_taper,
-                                         q_taper=q_taper, z_func=z_func,
-                                         mstar=mstar, dist=dist,
-                                         resample=resample, unit='jy/beam',
-                                         beam_spacing=beam_spacing,
-                                         PA_min=PA_min, PA_max=PA_max,
-                                         exclude_PA=exclude_PA, abs_PA=abs_PA,
-                                         mask=mask, mask_frame=mask_frame,
-                                         assume_correlated=assume_correlated,
-                                         skip_empty_annuli=skip_empty_annuli,
-                                         shadowed=shadowed)
+        x, y, dy = self.average_spectrum(
+            r_min=r_min,
+            r_max=r_max,
+            dr=dr,
+            x0=x0,
+            y0=y0,
+            inc=inc,
+            PA=PA,
+            z0=z0,
+            psi=psi,
+            z1=z1,
+            phi=phi,
+            r_cavity=r_cavity,
+            r_taper=r_taper,
+            q_taper=q_taper,
+            z_func=z_func,
+            mstar=mstar,
+            dist=dist,
+            resample=resample,
+            unit='jy/beam',
+            beam_spacing=beam_spacing,
+            PA_min=PA_min,
+            PA_max=PA_max,
+            exclude_PA=exclude_PA,
+            abs_PA=abs_PA,
+            mask=mask,
+            mask_frame=mask_frame,
+            skip_empty_annuli=skip_empty_annuli,
+            empirical_uncertainty=empirical_uncertainty,
+            velocity_resolution=velocity_resolution,
+            include_spectral_decorrlation=include_spectral_decorrlation,
+            shadowed=shadowed,
+            )
 
         # Calculate the area of the integration region. TODO: Move this section
         # to its own function to avoid having to calculate this twice.
@@ -518,19 +878,72 @@ class imagecube(object):
         else:
             _mask_A = np.ones(self.data[0].shape)
 
-        _mask_B = self.get_mask(r_min, r_max, exclude_r=False, PA_min=PA_min,
-                                PA_max=PA_max, exclude_PA=exclude_PA,
-                                abs_PA=abs_PA, x0=x0, y0=y0, inc=inc, PA=PA,
-                                z0=z0, psi=psi, z1=z1, phi=phi,
-                                r_cavity=r_cavity, r_taper=r_taper,
-                                q_taper=q_taper, z_func=z_func,
-                                mask_frame=mask_frame, shadowed=shadowed)
+        _mask_B = self.get_mask(
+            r_min,
+            r_max,
+            exclude_r=False,
+            PA_min=PA_min,
+            PA_max=PA_max,
+            exclude_PA=exclude_PA,
+            abs_PA=abs_PA,
+            x0=x0,
+            y0=y0,
+            inc=inc,
+            PA=PA,
+            z0=z0,
+            psi=psi,
+            z1=z1,
+            phi=phi,
+            r_cavity=r_cavity,
+            r_taper=r_taper,
+            q_taper=q_taper,
+            z_func=z_func,
+            mask_frame=mask_frame,
+            shadowed=shadowed,
+            )
 
-        beams = np.sum(_mask_A * _mask_B) * self.dpix**2 / self.beamarea_arcsec
+        if include_spectral_decorrlation and not empirical_uncertainty:
+            v0_map = self.keplerian(
+                inc=inc,
+                PA=PA,
+                mstar=mstar,
+                dist=dist,
+                x0=x0,
+                y0=y0,
+                vlsr=0.0,
+                z0=z0,
+                psi=psi,
+                r_cavity=r_cavity,
+                r_taper=r_taper,
+                q_taper=q_taper,
+                z1=z1,
+                phi=phi,
+                z_func=z_func,
+                r_min=r_min,
+                r_max=r_max,
+                cylindrical=False,
+                shadowed=shadowed,
+                )
+
+            samples = self._independent_samples(
+                v0_map=v0_map,
+                mask=None,
+                velocity_resolution=velocity_resolution,
+                plot=False,
+                ignore_spectral_correlation=True,
+                )
+        else:
+            samples = self.beams_per_pix
 
         # Rescale from Jy/beam to Jy and return.
 
-        return x, y * beams, dy * beams
+        nbeams = np.sum(samples * _mask_A * _mask_B)
+        y *= nbeams
+        if empirical_uncertainty:
+            dy = imagecube.estimate_uncertainty(y) * np.ones(y.size)
+        else:
+            dy *= nbeams**0.5
+        return x, y, dy
 
     def radial_spectra(self, rvals=None, rbins=None, dr=None, x0=0.0, y0=0.0,
                        inc=0.0, PA=0.0, z0=None, psi=None, r_cavity=None,
@@ -1264,6 +1677,64 @@ class imagecube(object):
                 output = self.path.replace('.fits', '_shifted.fits')
             fits.writeto(output, shifted.astype('float32'), self.header)
         return shifted
+
+    def keplerian(self, inc, PA, mstar, dist, x0=0.0, y0=0.0, vlsr=0.0,
+                  z0=None, psi=None, r_cavity=None, r_taper=None, q_taper=None,
+                  z1=None, phi=None, z_func=None, r_min=None, r_max=None,
+                  cylindrical=False, shadowed=False):
+        """
+        Projected Keplerian velocity profile in [m/s].
+
+        Args:
+            inc (float): Inclination of the disk in [degrees].
+            PA (float): Position angle of the disk in [degrees],
+                measured east-of-north towards the redshifted major axis.
+            mstar (float): Stellar mass in [Msun].
+            dist (float): Distance to the source in [pc].
+            x0 (Optional[float]): Source center offset along the x-axis in
+                [arcsec].
+            y0 (Optional[float]): Source center offset along the y-axis in
+                [arcsec].
+            vlsr (Optional[float]): Systemic velocity in [m/s].
+            z0 (Optional[float]): Emission height in [arcsec] at a radius of
+                1".
+            psi (Optional[float]): Flaring angle of the emission surface.
+            r_cavity (Optional[float]): Edge of the inner cavity for the
+                emission surface in [arcsec].
+            r_taper (Optional[float]): Characteristic radius in [arcsec] of the
+                exponential taper to the emission surface.
+            q_taper (Optional[float]): Exponent of the exponential taper of the
+                emission surface.
+            z1 (Optional[float]): Correction to emission height at 1" in
+                [arcsec].
+            phi (Optional[float]): Flaring angle correction term.
+            z_func (Optional[callable]): A function which returns the emission
+                height in [arcsec] for a radius given in [arcsec].
+            r_min (Optional[float]): The inner radius in [arcsec] to model.
+            r_max (Optional[float]): The outer radius in [arcsec] to model.
+            cylindrical (Optional[bool]): If ``True``, force cylindrical
+                rotation, i.e. ignore the height in calculating the velocity.
+            shadowed (Optional[bool]): If ``True``, use a slower algorithm for
+                deprojecting the pixel coordinates into disk-center coordiantes
+                which can handle shadowed pixels.
+        """
+        rvals, tvals, zvals = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA,
+                                               z0=z0, psi=psi, z1=z1, phi=phi,
+                                               r_cavity=r_cavity,
+                                               r_taper=r_taper,
+                                               q_taper=q_taper,
+                                               z_func=z_func,
+                                               shadowed=shadowed)
+        r_min = 0.0 if r_min is None else r_min
+        r_max = rvals.max() if r_max is None else r_max
+        assert r_min < r_max, 'r_min >= r_max'
+        r_m = rvals * dist * sc.au
+        z_m = 0.0 if cylindrical else zvals * dist * sc.au
+        vkep = sc.G * mstar * 1.988e30 * np.power(r_m, 2.0)
+        vkep = np.sqrt(vkep / np.power(np.hypot(r_m, z_m), 3.0))
+        vkep = vkep * np.sin(abs(np.radians(inc))) * np.cos(tvals) + vlsr
+        mask = np.logical_and(rvals >= r_min, rvals <= r_max)
+        return np.where(mask, vkep, np.nan)
 
     def find_center(self, dx=None, dy=None, Nx=None, Ny=None, mask=None,
                     v_min=None, v_max=None, spectrum='avg', SNR='peak',
@@ -2280,9 +2751,10 @@ class imagecube(object):
         return self.bmaj, self.bmin, self.bpa
 
     @property
-    def beam_per_pix(self):
+    def beams_per_pix(self):
         """Number of beams per pixel."""
         return self.dpix**2.0 / self.beamarea_arcsec
+
 
     @property
     def pix_per_beam(self):
@@ -2304,7 +2776,8 @@ class imagecube(object):
         """Clip the cube plus or minus clip arcseconds from the origin."""
         if radius > min(self.xaxis.max(), self.yaxis.max()):
             if self.verbose:
-                print("WARNING: `FOV` larger than input field of view.")
+                print('WARNING: FOV = {:.1f}" larger than '.format(radius * 2)
+                      + 'FOV of cube: {:.1f}".'.format(self.xaxis.max() * 2))
         else:
             xa = abs(self.xaxis - radius).argmin()
             if self.xaxis[xa] < radius:
@@ -2390,6 +2863,19 @@ class imagecube(object):
         if 'freq' in self.header['ctype3'].lower():
             return self._readspectralaxis(a)
         return self._readrestfreq() * (1.0 - self._readvelocityaxis() / sc.c)
+
+    def _calculate_symmetric_velocity_axis(self):
+        """Returns a symmetric velocity axis for decorrelation functions."""
+        velax_symmetric = np.arange(self.velax.size).astype('float')
+        velax_symmetric -= velax_symmetric.max() / 2
+        if abs(velax_symmetric).min() > 0.0:
+            velax_symmetric -= abs(velax_symmetric).min()
+        if abs(velax_symmetric[0]) < abs(velax_symmetric[-1]):
+            velax_symmetric = velax_symmetric[:-1]
+        elif abs(velax_symmetric[0]) > abs(velax_symmetric[-1]):
+            velax_symmetric = velax_symmetric[1:]
+        velax_symmetric *= self.chan
+        return velax_symmetric
 
     def frequency(self, vlsr=0.0, unit='GHz'):
         """
@@ -2491,7 +2977,7 @@ class imagecube(object):
         return np.sqrt(np.nansum(rms**2) / np.sum(np.isfinite(rms)))
 
     def print_RMS(self, N=5, r_in=0.0, r_out=1e10):
-        """Print the estimated RMS."""
+        """Print the estimated RMS in Jy/beam and K (using RJ approx.)."""
         rms = self.estimate_RMS(N, r_in, r_out)
         rms_K = self.jybeam_to_Tb_RJ(rms)
         print('{:.2f} mJy/beam ({:.2f} K)'.format(rms * 1e3, rms_K))

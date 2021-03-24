@@ -826,7 +826,9 @@ class annulus(object):
 
     def _resample_spectra(self, vpnts, spnts, resample=False, scatter=False):
         """
-        Resample the spectra to a given velocity axis.
+        Resample the spectra to a given velocity axis. The scatter is estimated
+        as the standard deviation of the bin (note that this is not rescaled by
+        the square root of the number of samples).
 
         Args:
             vpnts (ndarray): Array of the velocity values.
@@ -869,8 +871,7 @@ class annulus(object):
         if not scatter:
             return x, y
         dy = binned_statistic(vpnts, spnts, statistic='std', bins=bins)[0]
-        N = binned_statistic(vpnts, spnts, statistic='count', bins=bins)[0]
-        return x, y, dy / N**0.5
+        return x, y, dy
 
     def _get_masked_spectrum(self, x, y):
         """Return the masked spectrum for fitting."""
