@@ -75,7 +75,7 @@ class imagecube(object):
                          mask_frame='disk', unit='Jy/beam', mask=None,
                          skip_empty_annuli=True,
                          shadowed=False, empirical_uncertainty=False,
-                         include_spectral_decorrlation=True,
+                         include_spectral_decorrelation=True,
                          velocity_resolution=1.0):
         """
         Return the averaged spectrum over a given radial range, returning a
@@ -240,7 +240,7 @@ class imagecube(object):
         # numerically such that we can a) take account of any masks and b)
         # estimate the introduced spectral correlation.
 
-        if include_spectral_decorrlation and not empirical_uncertainty:
+        if include_spectral_decorrelation and not empirical_uncertainty:
             v0_map = self.keplerian(
                 inc=inc,
                 PA=PA,
@@ -741,7 +741,7 @@ class imagecube(object):
                             empirical_uncertainty=False,
                             skip_empty_annuli=True,
                             shadowed=False, velocity_resolution=1.0,
-                            include_spectral_decorrlation=True):
+                            include_spectral_decorrelation=True):
         """
         Return the integrated spectrum over a given radial range, returning a
         spectrum in units of [Jy].
@@ -862,12 +862,11 @@ class imagecube(object):
             skip_empty_annuli=skip_empty_annuli,
             empirical_uncertainty=empirical_uncertainty,
             velocity_resolution=velocity_resolution,
-            include_spectral_decorrlation=include_spectral_decorrlation,
+            include_spectral_decorrelation=include_spectral_decorrelation,
             shadowed=shadowed,
             )
 
-        # Calculate the area of the integration region. TODO: Move this section
-        # to its own function to avoid having to calculate this twice.
+        # Calculate the area of the integration region.
 
         if mask is not None:
             if mask.shape != self.data.shape:
@@ -902,42 +901,10 @@ class imagecube(object):
             shadowed=shadowed,
             )
 
-        if include_spectral_decorrlation and not empirical_uncertainty:
-            v0_map = self.keplerian(
-                inc=inc,
-                PA=PA,
-                mstar=mstar,
-                dist=dist,
-                x0=x0,
-                y0=y0,
-                vlsr=0.0,
-                z0=z0,
-                psi=psi,
-                r_cavity=r_cavity,
-                r_taper=r_taper,
-                q_taper=q_taper,
-                z1=z1,
-                phi=phi,
-                z_func=z_func,
-                r_min=r_min,
-                r_max=r_max,
-                cylindrical=False,
-                shadowed=shadowed,
-                )
-
-            samples = self._independent_samples(
-                v0_map=v0_map,
-                mask=None,
-                velocity_resolution=velocity_resolution,
-                plot=False,
-                ignore_spectral_correlation=True,
-                )
-        else:
-            samples = self.beams_per_pix
-
         # Rescale from Jy/beam to Jy and return.
 
-        nbeams = np.sum(samples * _mask_A * _mask_B)
+        nbeams = np.sum(self.beams_per_pix * _mask_A * _mask_B)
+
         y *= nbeams
         if empirical_uncertainty:
             dy = imagecube.estimate_uncertainty(y) * np.ones(y.size)
@@ -2755,7 +2722,6 @@ class imagecube(object):
         """Number of beams per pixel."""
         return self.dpix**2.0 / self.beamarea_arcsec
 
-
     @property
     def pix_per_beam(self):
         """Number of pixels in a beam."""
@@ -2866,7 +2832,10 @@ class imagecube(object):
 
     def _calculate_symmetric_velocity_axis(self):
         """Returns a symmetric velocity axis for decorrelation functions."""
-        velax_symmetric = np.arange(self.velax.size).astype('float')
+        try:
+            velax_symmetric = np.arange(self.velax.size).astype('float')
+        except AttributeError:
+            return np.array([0.0])
         velax_symmetric -= velax_symmetric.max() / 2
         if abs(velax_symmetric).min() > 0.0:
             velax_symmetric -= abs(velax_symmetric).min()
