@@ -903,13 +903,12 @@ class imagecube(object):
 
         # Rescale from Jy/beam to Jy and return.
 
-        nbeams = np.sum(self.beams_per_pix * _mask_A * _mask_B)
-
+        nbeams = self.beams_per_pix * np.sum(_mask_A * _mask_B)
         y *= nbeams
         if empirical_uncertainty:
             dy = imagecube.estimate_uncertainty(y) * np.ones(y.size)
         else:
-            dy *= nbeams**0.5
+            dy *= nbeams
         return x, y, dy
 
     def radial_spectra(self, rvals=None, rbins=None, dr=None, x0=0.0, y0=0.0,
