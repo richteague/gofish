@@ -45,7 +45,7 @@ from gofish import imagecube
 cube = imagecube('path/to/cube.fits')
 ```
 
-Once attached averaged spectrum over a user-specified region can be extracted using the known geometrical properties of the disk:
+Once attached, you can extract the average spectrum over a user-specified region using the known geometrical properties of the disk and priors about the velocity profile of the disk:
 
 ```python
 # Return the averaged spectrum between 0.0" and 1.0".
