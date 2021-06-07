@@ -75,6 +75,7 @@ Community Guidelines
    :caption: Contents:
 
    user/api
+   user/fishing_coordinates
    user/fishing_basics
    user/fishing_advanced
    user/fishing_masking

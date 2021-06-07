@@ -3,6 +3,7 @@ import numpy as np
 from astropy.io import fits
 import scipy.constants as sc
 from .annulus import annulus
+import matplotlib.pyplot as plt
 
 __all__ = ['imagecube']
 
@@ -474,7 +475,6 @@ class imagecube(object):
         # Diagnostic plots.
 
         if plot:
-            import matplotlib.pyplot as plt
             from matplotlib.ticker import MultipleLocator
 
             fig, ax = plt.subplots()
@@ -589,7 +589,6 @@ class imagecube(object):
         # Make diagnostic plots.
 
         if plot:
-            import matplotlib.pyplot as plt
             from matplotlib.ticker import MultipleLocator
             fig, axs = plt.subplots(figsize=(7, 4.5), constrained_layout=True,
                                     gridspec_kw=dict(height_ratios=(0.07, 1)),
@@ -3046,103 +3045,58 @@ class imagecube(object):
             return rvals, phi
         return rvals * np.cos(phi), rvals * np.sin(phi)
 
-    def disk_to_sky(self, coords, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=None,
-                    psi=None, r_cavity=None, r_taper=None, q_taper=None,
-                    z1=None, phi=None, z_func=None, return_idx=False,
-                    frame_in='cylindrical', shadowed=False,
-                    force_negative_surface=False, force_positive_surface=True):
+    def disk_to_sky(self, coords, inc, PA, x0=0.0, y0=0.0, frame='cartesian'):
         """
-        For a given disk midplane coordinate, either (r, theta) or (x, y),
-        return interpolated sky coordiantes in (x, y) for plotting. The input
-        needs to be a list like: ``coords = (rvals, tvals)``.
+        Project disk-frame coordinates onto the sky plane.
 
         Args:
-            coords (list): Midplane coordaintes to find in (x, y) in [arcsec,
-                arcsec] or (r, theta) in [arcsec, deg].
-            x0 (Optional[float]): Source right ascension offset [arcsec].
-            y0 (Optional[float]): Source declination offset [arcsec].
-            inc (Optional[float]): Source inclination [deg].
-            PA (Optional[float]): Source position angle [deg]. Measured
-                between north and the red-shifted semi-major axis in an
-                easterly direction.
-            z0 (Optional[float]): Aspect ratio at 1" for the emission surface.
-                To get the far side of the disk, make this number negative.
-            psi (Optional[float]): Flaring angle for the emission surface.
-            z1 (Optional[float]): Aspect ratio correction term at 1" for the
-                emission surface. Should be opposite sign to ``z0``.
-            phi (Optional[float]): Flaring angle correction term for the
-                emission surface.
-            z_func (Optional[callable]): User-defined function returning z in
-                [arcsec] at a given radius in [arcsec].
-            return_idx (Optional[bool]): If True, return the indices of the
-                nearest pixels rather than the interpolated values.
-            frame (Optional[str]): Frame of input coordinates, either
-                'cartesian' or 'polar'.
+            coords (tuple): A tuple of the disk-frame coordinates to transform.
+                Must be either cartestian, cylindrical or spherical frames,
+                specified by the ``frame`` argument. If only two coordinates
+                are given, the input is assumed to be 2D. All spatial
+                coordinates should be given in [arcsec], while all angular
+                coordinates should be given in [radians].
+            inc (float): Inclination of the disk in [deg].
+            PA (float): Position angle of the disk, measured Eastwards to the
+                red-shifted major axis from North in [deg].
+            x0 (Optional[float]): Source right ascension offset in [arcsec].
+            y0 (Optional[float]): Source declination offset in [arcsec].
+            frame (Optional[str]): Coordinate frame of the disk coordinates,
+                either ``'cartesian'``, ``'cylindrical'`` or ``'spherical'``.
 
         Returns:
-            x (float/int): Either the sky plane x-coordinate in [arcsec] or the
-                index of the closest pixel.
-            y (float/int): Either the sky plane y-coordinate in [arcsec] or the
-                index of the closest pixel.
+            Two arrays representing the projection of the input coordinates
+            onto the sky, ``x_sky`` and ``y_sky``.
         """
-
-        # Import the necessary module.
-
         try:
-            from scipy.interpolate import griddata
-        except Exception:
-            raise ValueError("Can't find 'scipy.interpolate.griddata'.")
-
-        # Make sure input coords are cartesian.
-
-        frame_in = frame_in.lower()
-        if frame_in not in ['cylindrical', 'cartesian']:
-            raise ValueError("frame_in must be 'cylindrical' or 'cartesian'.")
-        if frame_in == 'cylindrical':
-            xdisk = coords[0] * np.cos(np.radians(coords[1]))
-            ydisk = coords[0] * np.sin(np.radians(coords[1]))
+            c1, c2, c3 = coords
+        except ValueError:
+            c1, c2 = coords
+            c3 = np.zeros(c1.size)
+        if frame.lower() == 'cartesian':
+            x, y, z = c1, c2, c3
+        elif frame.lower() == 'cylindrical':
+            x = c1 * np.cos(c2)
+            y = c1 * np.sin(c2)
+            z = c3
+        elif frame.lower() == 'spherical':
+            x = c1 * np.cos(c2) * np.sin(c3)
+            y = c1 * np.sin(c2) * np.sin(c3)
+            z = c1 * np.cos(c3)
         else:
-            xdisk, ydisk = coords
-        xdisk, ydisk = np.squeeze(xdisk), np.squeeze(ydisk)
-
-        # Grab disk coordinates and sky coordinates to interpolate between.
-
-        out = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA, z0=z0, psi=psi,
-                               z1=z1, phi=phi, r_cavity=r_cavity,
-                               r_taper=r_taper, q_taper=q_taper, z_func=z_func,
-                               shadowed=shadowed, frame='cartesian',
-                               force_negative_surface=force_negative_surface,
-                               force_positive_surface=force_positive_surface)
-        xdisk_grid, ydisk_grid, _ = out
-        xdisk_grid, ydisk_grid = xdisk_grid.flatten(), ydisk_grid.flatten()
-        xsky_grid, ysky_grid = self._get_cart_sky_coords(x0=0.0, y0=0.0)
-        xsky_grid, ysky_grid = xsky_grid.flatten(), ysky_grid.flatten()
-
-        xsky = griddata((xdisk_grid, ydisk_grid), xsky_grid, (xdisk, ydisk),
-                        method='nearest' if return_idx else 'linear',
-                        fill_value=np.nan)
-        ysky = griddata((xdisk_grid, ydisk_grid), ysky_grid, (xdisk, ydisk),
-                        method='nearest' if return_idx else 'linear',
-                        fill_value=np.nan)
-        xsky, ysky = np.squeeze(xsky), np.squeeze(ysky)
-
-        # Return the values or calculate the indices.
-
-        if not return_idx:
-            xsky = xsky if xsky.size > 1 else xsky[0]
-            ysky = ysky if ysky.size > 1 else ysky[0]
-            return xsky, ysky
-        xidx = np.array([abs(self.xaxis - x).argmin() for x in xsky])
-        yidx = np.array([abs(self.yaxis - y).argmin() for y in ysky])
-        xidx = xidx if xidx.size > 1 else xidx[0]
-        yidx = yidx if yidx.size > 1 else yidx[0]
-        return xidx, yidx
+            raise ValueError("frame_in must be 'cartestian'," +
+                             " 'cylindrical' or 'spherical'.")
+        inc = np.radians(inc)
+        PA = -np.radians(PA + 90.0)
+        y_roll = np.cos(inc) * y - np.sin(inc) * z
+        x_sky = np.cos(PA) * x - np.sin(PA) * y_roll
+        y_sky = np.sin(PA) * x + np.cos(PA) * y_roll
+        return x_sky, y_sky
 
     # -- Plotting Functions -- #
 
     def plot_center(self, x0s, y0s, SNR, normalize=True):
         """Plot the array of SNR values."""
-        import matplotlib.pyplot as plt
 
         # Find the center.
         SNR_mask = np.isfinite(SNR)
@@ -3196,8 +3150,6 @@ class imagecube(object):
 
         This will override any of the default style parameters.
         """
-        # Imports
-        import matplotlib.pyplot as plt
 
         # Grab the spectra.
         out = self.radial_spectra(rbins=rbins, rvals=rvals, dr=dr, x0=x0,
@@ -3245,6 +3197,148 @@ class imagecube(object):
                        color=kwargs.pop('color', kwargs.pop('c', 'k')),
                        zorder=kwargs.pop('zorder', 1000), **kwargs)
         ax.add_patch(beam)
+
+    def plot_surface(self, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=None, psi=None,
+                     r_cavity=None, r_taper=None, q_taper=None, z_func=None,
+                     shadowed=False, r_max=None, fill=None, ax=None,
+                     contour_kwargs=None, imshow_kwargs=None):
+        """
+        Overplot the assumed emission surface.
+
+        Args:
+            x0 (Optional[float]): Source right ascension offset [arcsec].
+            y0 (Optional[float]): Source declination offset [arcsec].
+            inc (Optional[float]): Source inclination [deg].
+            PA (Optional[float]): Source position angle [deg]. Measured
+                between north and the red-shifted semi-major axis in an
+                easterly direction.
+            z0 (Optional[float]): Aspect ratio at 1" for the emission surface.
+                To get the far side of the disk, make this number negative.
+            psi (Optional[float]): Flaring angle for the emission surface.
+            r_cavity (Optional[float]): Edge of the inner cavity for the
+                emission surface in [arcsec].
+            r_taper (Optional[float]): Characteristic radius in [arcsec] of the
+                exponential taper to the emission surface.
+            q_taper (Optional[float]): Exponent of the exponential taper of the
+                emission surface.
+            z_func (Optional[function]): A function which provides
+                :math:`z(r)`. Note that no checking will occur to make sure
+                this is a valid function.
+            shadowed (Optional[bool]): If ``True``, use the slower, but more
+                robust method for deprojecting pixel values.
+            r_max (Optional[float]): Maximum radius in [arcsec] to plot the
+                emission surface out to.
+            fill (Optional[str]): A string to execute (be careful!) to fill in
+                the emission surface using ``rvals``, ``tvals`` and ``zvals``
+                as returned by ``disk_coords``. For example, to plot the radial
+                values use ``fill='rvals'``. To plot the projection of
+                rotational velocities, use ``fill='rvals * np.cos(tvals)'``.
+            ax (Optional[matplotlib axis instance]): Axis to plot onto.
+                contour_kwargs (Optional[dict]): Kwargs to pass to
+                ``matplolib.contour`` to overplot the mesh.
+
+        Returns:
+            The ``ax`` instance.
+        """
+
+        # Generate the axes.
+
+        if ax is None:
+            _, ax = plt.subplots()
+
+        # Get the disk-frame coordinates.
+
+        rvals, tvals, zvals = self.disk_coords(x0=x0, y0=y0,
+                                               inc=inc, PA=PA,
+                                               z0=z0, psi=psi,
+                                               r_cavity=r_cavity,
+                                               r_taper=r_taper,
+                                               q_taper=q_taper,
+                                               z_func=z_func,
+                                               shadowed=shadowed)
+
+        # Mask the data based on r_max.
+
+        r_max = np.nanmax(rvals) if r_max is None else r_max
+        zvals = np.where(rvals <= r_max, zvals, np.nan)
+        tvals = np.where(rvals <= r_max, tvals, np.nan)
+        tvals = np.where(rvals >= 0.5 * self.bmaj, tvals, np.nan)
+        rvals = np.where(rvals <= r_max, rvals, np.nan)
+
+        # Fill in the background.
+
+        if fill is not None:
+            kw = {} if imshow_kwargs is None else imshow_kwargs
+            kw['origin'] = 'lower'
+            kw['extent'] = self.extent
+            ax.imshow(eval(fill), **kw)
+
+        # Draw the contours. The azimuthal angles are drawn on individually to
+        # avoid having overlapping lines about the +\- pi boundary making a
+        # particularly thick line.
+
+        kw = {} if contour_kwargs is None else contour_kwargs
+        kw['levels'] = kw.pop('levels', np.arange(0.5 * self.bmaj,
+                                                  0.99 * r_max,
+                                                  0.5 * self.bmaj))
+        kw['levels'] = np.append(kw['levels'], 0.99 * r_max)
+        kw['linewidths'] = kw.pop('linewidths', 1.0)
+        kw['colors'] = kw.pop('colors', 'k')
+        ax.contour(self.xaxis, self.yaxis, rvals, **kw)
+
+        kw['levels'] = [0.0]
+        for t in np.arange(-np.pi, np.pi, np.pi / 8.0):
+            if t - 0.1 < -np.pi:
+                a = np.where(abs(tvals - t) <= 0.1,
+                             tvals - t, np.nan)
+                b = np.where(abs(tvals - 2.0 * np.pi - t) <= 0.1,
+                             tvals - 2.0 * np.pi - t, np.nan)
+                amask = np.where(np.isfinite(a), 1, -1)
+                bmask = np.where(np.isfinite(b), 1, -1)
+                a = np.where(np.isfinite(a), a, 0.0)
+                b = np.where(np.isfinite(b), b, 0.0)
+                ttmp = np.where(amask * bmask < 1, a + b, np.nan)
+            elif t + 0.1 > np.pi:
+                a = np.where(abs(tvals - t) <= 0.1,
+                             tvals - t, np.nan)
+                b = np.where(abs(tvals + 2.0 * np.pi - t) <= 0.1,
+                             tvals + 2.0 * np.pi - t, np.nan)
+                amask = np.where(np.isfinite(a), 1, -1)
+                bmask = np.where(np.isfinite(b), 1, -1)
+                a = np.where(np.isfinite(a), a, 0.0)
+                b = np.where(np.isfinite(b), b, 0.0)
+                ttmp = np.where(amask * bmask < 1, a + b, np.nan)
+            else:
+                ttmp = np.where(abs(tvals - t) <= 0.1, tvals - t, np.nan)
+            ax.contour(self.xaxis, self.yaxis, ttmp, **kw)
+        ax.set_xlim(max(ax.get_xlim()), min(ax.get_xlim()))
+        ax.set_aspect(1)
+        return ax
+
+    def plot_maximum(self, ax=None, imshow_kwargs=None):
+        """
+        Plot the maximum along the spectral axis.
+
+        Args:
+            ax (Optional[matplotlib axis instance]): Axis to use for plotting.
+            imshow_kwargs (Optional[dict]): Kwargs to pass to imshow.
+
+        Return:
+            The axis with the maximum plotted.
+        """
+        from matplotlib.ticker import MultipleLocator
+        ax = plt.subplots()[1] if ax is None else ax
+        kw = {} if imshow_kwargs is None else imshow_kwargs
+        kw['origin'] = 'lower'
+        kw['extent'] = self.extent
+        im = ax.imshow(np.nanmax(self.data, axis=0), **kw)
+        cb = plt.colorbar(im, ax=ax)
+        cb.set_label('Peak Intensity', rotation=270, labelpad=13)
+        ax.xaxis.set_major_locator(MultipleLocator(2.0))
+        ax.yaxis.set_major_locator(MultipleLocator(2.0))
+        ax.set_xlabel('Offset (arcsec)')
+        ax.set_ylabel('Offset (arcsec)')
+        return ax
 
     def plot_mask(self, ax, r_min=None, r_max=None, exclude_r=False,
                   PA_min=None, PA_max=None, exclude_PA=False, abs_PA=False,
