@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.abspath('..'))
 # -- Project information -----------------------------------------------------
 
 project = 'GoFish'
-copyright = '2020, Richard Teague'
+copyright = '2020, 2021, Richard Teague'
 author = 'Richard Teague'
 
 # The full version, including alpha/beta/rc tags
