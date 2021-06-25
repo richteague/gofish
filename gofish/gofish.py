@@ -723,9 +723,7 @@ class imagecube(object):
         std = np.nanmax(a)
         for _ in range(niter):
             std_new = np.nanstd(a[(abs(a) <= nsigma * std) & nonzero])
-            if std_new == std:
-                return std
-            if np.isnan(std_new) or std_new == 0.0:
+            if std_new == std or np.isnan(std_new) or std_new == 0.0:
                 return std
             std = std_new
         return std
@@ -2724,6 +2722,11 @@ class imagecube(object):
     def pix_per_beam(self):
         """Number of pixels in a beam."""
         return self.beamarea_arcsec / self.dpix**2.0
+
+    @propery
+    def FOV(self):
+        """Field of view."""
+        return self.xaxis.max() - self.xaxis.min()
 
     def _clip_cube_velocity(self, v_min=None, v_max=None):
         """Clip the cube to within ``vmin`` and ``vmax``."""
