@@ -2723,7 +2723,7 @@ class imagecube(object):
         """Number of pixels in a beam."""
         return self.beamarea_arcsec / self.dpix**2.0
 
-    @propery
+    @property
     def FOV(self):
         """Field of view."""
         return self.xaxis.max() - self.xaxis.min()
