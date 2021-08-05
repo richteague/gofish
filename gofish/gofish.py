@@ -1,4 +1,5 @@
 import os
+import warnings
 import numpy as np
 from astropy.io import fits
 import scipy.constants as sc
@@ -6,6 +7,7 @@ from .annulus import annulus
 import matplotlib.pyplot as plt
 
 __all__ = ['imagecube']
+warnings.filterwarnings('ignore')
 
 
 class imagecube(object):
@@ -3378,7 +3380,7 @@ class imagecube(object):
     def plot_surface(self, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=None, psi=None,
                      r_cavity=None, r_taper=None, q_taper=None, z_func=None,
                      shadowed=False, r_max=None, fill=None, ax=None,
-                     contour_kwargs=None, imshow_kwargs=None):
+                     contour_kwargs=None, imshow_kwargs=None, return_fig=True):
         """
         Overplot the assumed emission surface.
 
@@ -3413,6 +3415,8 @@ class imagecube(object):
             ax (Optional[matplotlib axis instance]): Axis to plot onto.
                 contour_kwargs (Optional[dict]): Kwargs to pass to
                 ``matplolib.contour`` to overplot the mesh.
+            return_fig (Optional[bool]): If ``True``, return the figure for
+                additional plotting.
 
         Returns:
             The ``ax`` instance.
@@ -3421,7 +3425,9 @@ class imagecube(object):
         # Generate the axes.
 
         if ax is None:
-            _, ax = plt.subplots()
+            fig, ax = plt.subplots()
+        else:
+            return_fig = False
 
         # Get the disk-frame coordinates.
 
@@ -3490,7 +3496,9 @@ class imagecube(object):
             ax.contour(self.xaxis, self.yaxis, ttmp, **kw)
         ax.set_xlim(max(ax.get_xlim()), min(ax.get_xlim()))
         ax.set_aspect(1)
-        return ax
+
+        if return_fig:
+            return fig
 
     def plot_maximum(self, ax=None, imshow_kwargs=None):
         """
