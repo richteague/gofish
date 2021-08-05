@@ -548,7 +548,7 @@ class imagecube(object):
         # and any user-defined masks. This should result in a 2D image with
         # values of 1.0 or 0.0 (in the mask or out the mask).
 
-        beam_mask = self._beam_mask(x_idx, y_idx)
+        beam_mask = self._beam_mask(self.xaxis[x_idx], self.yaxis[y_idx])
         user_mask = np.ones(beam_mask.shape) if mask is None else mask
         assert beam_mask.shape == user_mask.shape, 'wrong shape for `mask`'
         combined_mask = np.logical_and(beam_mask, user_mask).astype('float')
@@ -672,29 +672,36 @@ class imagecube(object):
 
         return np.where(independent_samples < 1e-10, 0.0, independent_samples)
 
-    def _beam_mask(self, x_idx, y_idx, threshold=0.5):
+    def _beam_mask(self, x, y, threshold=0.5, stretch=1.0, response=False):
         """
-        Returns a 2D Gaussian mask based on the attached beam centered on a
-        pixel given by [y_idx, x_idx].
+        Returns a 2D Gaussian mask based on the attached beam centered at
+        (x, y) on the sky.
 
         Args:
-            x_idx (int): x-axis index of the pixel.
-            y_idx (int): y-axis index of the pixel.
+            x (flaot): RA offset of the center of the beam.
+            y (float): Dec offset of the center of the beam.
             threshold (Optional[float]): Threshold beam power to consider a
                 pixel within the beam. Default is 0.5.
+            stretch (Optional[float]): Stretch the beam by this factor. A
+                `stretch=2` will result in a beam mask that is twice as large
+                as the attached beam.
+            response (Optional[bool]): If ``True``, return the beam response
+                function rather than a boolean mask.
 
         Returns:
-            beammask (arr): 2D boolean array of pixels covered by the beam.
+            beammask (arr): 2D boolean array of pixels covered by the beam if
+            ``response=False``, the default, otherwise a 2D array of the beam
+            response function centered at that location.
         """
-        xx, yy = np.meshgrid((self.xaxis - self.xaxis[x_idx])[None, :],
-                             (self.yaxis - self.yaxis[y_idx])[:, None])
+        xx, yy = np.meshgrid(self.xaxis - x, self.yaxis - y)
         theta = -np.radians(self.bpa)
-        std_x = 0.5 * self.bmin / np.sqrt(np.log(2.0))
-        std_y = 0.5 * self.bmaj / np.sqrt(np.log(2.0))
+        std_x = 0.5 * stretch * self.bmin / np.sqrt(np.log(2.0))
+        std_y = 0.5 * stretch * self.bmaj / np.sqrt(np.log(2.0))
         a = np.cos(theta)**2 / std_x**2 + np.sin(theta)**2 / std_y**2
         b = np.sin(2*theta) / std_x**2 - np.sin(2*theta) / std_y**2
         c = np.sin(theta)**2 / std_x**2 + np.cos(theta)**2 / std_y**2
-        return np.exp(-(a*xx**2 + b*xx*yy + c*yy**2)) >= threshold
+        f = np.exp(-(a*xx**2 + b*xx*yy + c*yy**2))
+        return f if response else f >= threshold
 
     @staticmethod
     def estimate_uncertainty(a, nsigma=3.0, niter=20):
@@ -1639,6 +1646,7 @@ class imagecube(object):
             else:
                 output = self.path.replace('.fits', '_shifted.fits')
             fits.writeto(output, shifted.astype('float32'), self.header)
+
         return shifted
 
     def keplerian(self, inc, PA, mstar, dist, x0=0.0, y0=0.0, vlsr=0.0,
@@ -2596,6 +2604,117 @@ class imagecube(object):
         t_disk = np.arctan2(y_disk, x_disk)
         return x_disk, y_disk, r_disk, t_disk
 
+    def sky_to_disk(self, coords, x0=0.0, y0=0.0, inc=0.0, PA=0.0,
+                    coord_type='cartesian', coord_type_out='cartesian'):
+        """
+        Deproject the sky plane coordinates into midplane disk-frame
+        coordinates. Accounting for non-zero emission heights in progress.
+
+        Args:
+            coords (tuple): A tuple of the sky-frame coordinates to transform.
+                Must be either cartestian or cylindrical frames specified by
+                the ``coord_type`` argument. All spatial coordinates should be
+                given in [arcsec], while all angular coordinates should be
+                given in [radians].
+            x0 (Optional[float]): Source right ascension offset in [arcsec].
+            y0 (Optional[float]): Source declination offset in [arcsec].
+            inc (float): Inclination of the disk in [deg].
+            PA (float): Position angle of the disk, measured Eastwards to the
+                red-shifted major axis from North in [deg].
+            coord_type (Optional[str]): The coordinate type of the sky-frame
+                coordinates, either ``'cartesian'`` or ``'cylindrical'``.
+            coord_type_out (Optional[str]): The coordinate type of the returned
+                disk-frame coordinates, either ``'cartesian'`` or
+                ``'cylindrical'``.
+
+        Returns:
+            Two arrays representing the deprojection of the input coordinates
+            into the disk-frame, ``x_disk`` and ``y_disk`` if
+            ``coord_type_out='cartesian'`` otherwise ``r_disk`` and ``t_disk``.
+        """
+
+        c1, c2 = np.squeeze(coords[0]), np.squeeze(coords[1])
+        if coord_type.lower() == 'cartesian':
+            x_sky, y_sky = c1, c2
+        elif coord_type.lower() == 'cylindrical':
+            x_sky = c1 * np.cos(c2)
+            y_sky = c1 * np.sin(c2)
+        else:
+            message = "`coord_type` must be 'cartesian' or 'cylindrical'."
+            raise ValueError(message)
+
+        x_rot, y_rot = imagecube._rotate_coords(x_sky-x0, y_sky-y0, PA)
+        x_disk, y_disk = imagecube._deproject_coords(x_rot, y_rot, inc)
+
+        if coord_type_out.lower() == 'cartesian':
+            return x_disk, y_disk
+        elif coord_type_out.lower() == 'cylindrical':
+            return np.hypot(x_disk, y_disk), np.arctan2(y_disk, x_disk)
+        else:
+            message = "`coord_type_out` must be 'cartesian' or 'cylindrical'."
+            raise ValueError(message)
+
+    def disk_to_sky(self, coords, inc, PA, x0=0.0, y0=0.0,
+                    coord_type='cartesian', return_idx=False):
+        """
+        Project disk-frame coordinates onto the sky plane. Can return either
+        the coordinates (the default return), useful for plotting, or the
+        pixel indices (if ``return_idx=True``) which can be used to extract a
+        spectrum at a particular location.
+
+        Args:
+            coords (tuple): A tuple of the disk-frame coordinates to transform.
+                Must be either cartestian, cylindrical or spherical frames,
+                specified by the ``frame`` argument. If only two coordinates
+                are given, the input is assumed to be 2D. All spatial
+                coordinates should be given in [arcsec], while all angular
+                coordinates should be given in [radians].
+            inc (float): Inclination of the disk in [deg].
+            PA (float): Position angle of the disk, measured Eastwards to the
+                red-shifted major axis from North in [deg].
+            x0 (Optional[float]): Source right ascension offset in [arcsec].
+            y0 (Optional[float]): Source declination offset in [arcsec].
+            coord_type (Optional[str]): Coordinate system used for the disk
+                coordinates, either ``'cartesian'``, ``'cylindrical'`` or
+                ``'spherical'``.
+            return_idx (Optional[bool]): If true, return the index of the
+                nearest pixel to each on-sky position.
+
+        Returns:
+            Two arrays representing the projection of the input coordinates
+            onto the sky, ``x_sky`` and ``y_sky``, unless ``return_idx`` is
+            ``True``, in which case the arrays are the indices of the nearest
+            pixels on the sky.
+        """
+        c1, c2 = np.squeeze(coords[0]), np.squeeze(coords[1])
+        try:
+            c3 = np.squeeze(coords[2])
+        except IndexError:
+            c3 = np.zeros(c1.size)
+        if coord_type.lower() == 'cartesian':
+            x, y, z = c1, c2, c3
+        elif coord_type.lower() == 'cylindrical':
+            x = c1 * np.cos(c2)
+            y = c1 * np.sin(c2)
+            z = c3
+        elif coord_type.lower() == 'spherical':
+            x = c1 * np.cos(c2) * np.sin(c3)
+            y = c1 * np.sin(c2) * np.sin(c3)
+            z = c1 * np.cos(c3)
+        else:
+            raise ValueError("frame_in must be 'cartestian'," +
+                             " 'cylindrical' or 'spherical'.")
+        inc = np.radians(inc)
+        PA = np.radians(PA - 90.0)
+        y_roll = np.cos(inc) * y - np.sin(inc) * z
+        x_sky = np.cos(PA) * x - np.sin(PA) * y_roll
+        y_sky = -np.sin(PA) * x - np.cos(PA) * y_roll
+        if not return_idx:
+            return x_sky, y_sky
+        x_pix = np.array([abs(self.xaxis - xx).argmin() for xx in x_sky])
+        y_pix = np.array([abs(self.yaxis - yy).argmin() for yy in y_sky])
+        return x_pix, y_pix
+
     # -- Spectral Axis Manipulation -- #
 
     def velocity_to_restframe_frequency(self, velax=None, vlsr=0.0):
@@ -2647,9 +2766,9 @@ class imagecube(object):
         # Position axes.
         self.xaxis = self._readpositionaxis(a=1)
         self.yaxis = self._readpositionaxis(a=2)
+        self.dpix = np.mean([abs(np.diff(self.xaxis))])
         self.nxpix = self.xaxis.size
         self.nypix = self.yaxis.size
-        self.dpix = np.mean([abs(np.diff(self.xaxis))])
 
         # Spectral axis.
         self.nu0 = self._readrestfreq()
@@ -2784,7 +2903,7 @@ class imagecube(object):
         try:
             a_len = self.header['naxis%d' % a]
             a_del = self.header['cdelt%d' % a]
-            a_pix = self.header['crpix%d' % a] - 0.5
+            a_pix = self.header['crpix%d' % a]
         except KeyError:
             if self._user_pixel_scale is None:
                 print('WARNING: No axis information found.')
@@ -2973,6 +3092,71 @@ class imagecube(object):
         """Cube field of view for use with Matplotlib's ``imshow``."""
         return [self.xaxis[0], self.xaxis[-1], self.yaxis[0], self.yaxis[-1]]
 
+    def get_spectrum(self, coords, x0=0.0, y0=0.0, inc=0.0, PA=0.0,
+                     frame='sky', coord_type='cartesian', area=0.0,
+                     beam_weighting=False, return_mask=False):
+        """
+        Return a spectrum at a position defined by a coordinates given either
+        in sky-frame position (``frame='sky'``) or a disk-frame location
+        (``frame='disk'``).
+
+         - Will average over an area `area` times the beam (include the shape?).
+         - If `area=0` then assume we just take the pixel.
+         - if `beam_weighting=True` then the average should use the beam response as a weight.
+
+        Args:
+            TBD
+
+        Retuns:
+            x, y, dy
+        """
+
+        # Convert the input coordinate into on-sky cartesian coordinates
+        # relative to the center of the image.
+
+        if frame.lower() == 'sky':
+            if inc != 0.0 or PA != 0.0:
+                message = "WARNING: You shouldn't need to specify `inc` or "
+                message += "`PA` when using `frame='sky'`."
+                print(message)
+            c1 = np.squeeze(coords[0])
+            c2 = np.squeeze(coords[1])
+            if coord_type.lower() == 'cartesian':
+                x, y = c1 + x0, c2 + y0
+            elif coord_type.lower() == 'cylindrical':
+                x = x0 + c1 * np.cos(c2 - np.radians(90.0))
+                y = y0 - c1 * np.sin(c2 - np.radians(90.0))
+        elif frame.lower() == 'disk':
+            x, y = self.disk_to_sky(coords=coords, coord_type=coord_type,
+                                    inc=inc, PA=PA, x0=x0, y0=y0)
+
+        # Define the area to average over.
+
+        if area == 0.0:
+            x_pix = abs(self.xaxis - x).argmin()
+            y_pix = abs(self.yaxis - y).argmin()
+            mask = np.zeros(self.data[0].shape)
+            weights = np.zeros(mask.shape)
+            mask[y_pix, x_pix] = 1
+            weights[y_pix, x_pix] = 1
+        elif area > 0.0:
+            mask = self._beam_mask(x, y, stretch=area)
+            weights = self._beam_mask(x, y, stretch=area, response=True)
+        else:
+            raise ValueError("`area` must be a non-negative value.")
+        weights = weights if beam_weighting else mask
+
+        # If requested, return the mask and the weighting instead.
+
+        if return_mask:
+            return mask, weights
+
+        # Otherwise, extract the spectrum and average it.
+
+        y = [np.average(c * mask, weights=weights) for c in self.data]
+        dy = max(1.0, mask.sum() * self.beams_per_pix)**-0.5 * self.rms
+        return self.velax, np.array(y), np.array([dy for _ in y])
+
     # -- Spiral Functions -- #
 
     def spiral_coords(self, r_p, t_p, m=None, r_min=None, r_max=None,
@@ -3047,54 +3231,6 @@ class imagecube(object):
         if frame_out == 'cylindrical':
             return rvals, phi
         return rvals * np.cos(phi), rvals * np.sin(phi)
-
-    def disk_to_sky(self, coords, inc, PA, x0=0.0, y0=0.0, frame='cartesian'):
-        """
-        Project disk-frame coordinates onto the sky plane.
-
-        Args:
-            coords (tuple): A tuple of the disk-frame coordinates to transform.
-                Must be either cartestian, cylindrical or spherical frames,
-                specified by the ``frame`` argument. If only two coordinates
-                are given, the input is assumed to be 2D. All spatial
-                coordinates should be given in [arcsec], while all angular
-                coordinates should be given in [radians].
-            inc (float): Inclination of the disk in [deg].
-            PA (float): Position angle of the disk, measured Eastwards to the
-                red-shifted major axis from North in [deg].
-            x0 (Optional[float]): Source right ascension offset in [arcsec].
-            y0 (Optional[float]): Source declination offset in [arcsec].
-            frame (Optional[str]): Coordinate frame of the disk coordinates,
-                either ``'cartesian'``, ``'cylindrical'`` or ``'spherical'``.
-
-        Returns:
-            Two arrays representing the projection of the input coordinates
-            onto the sky, ``x_sky`` and ``y_sky``.
-        """
-        try:
-            c1, c2, c3 = coords
-        except ValueError:
-            c1, c2 = coords
-            c3 = np.zeros(c1.size)
-        if frame.lower() == 'cartesian':
-            x, y, z = c1, c2, c3
-        elif frame.lower() == 'cylindrical':
-            x = c1 * np.cos(c2)
-            y = c1 * np.sin(c2)
-            z = c3
-        elif frame.lower() == 'spherical':
-            x = c1 * np.cos(c2) * np.sin(c3)
-            y = c1 * np.sin(c2) * np.sin(c3)
-            z = c1 * np.cos(c3)
-        else:
-            raise ValueError("frame_in must be 'cartestian'," +
-                             " 'cylindrical' or 'spherical'.")
-        inc = np.radians(inc)
-        PA = -np.radians(PA + 90.0)
-        y_roll = np.cos(inc) * y - np.sin(inc) * z
-        x_sky = np.cos(PA) * x - np.sin(PA) * y_roll
-        y_sky = np.sin(PA) * x + np.cos(PA) * y_roll
-        return x_sky, y_sky
 
     # -- Plotting Functions -- #
 
