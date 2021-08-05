@@ -3098,17 +3098,54 @@ class imagecube(object):
         """
         Return a spectrum at a position defined by a coordinates given either
         in sky-frame position (``frame='sky'``) or a disk-frame location
-        (``frame='disk'``).
+        (``frame='disk'``). The coordinates can be either in cartesian or
+        cylindrical frames set by ``coord_type``.
 
-         - Will average over an area `area` times the beam (include the shape?).
-         - If `area=0` then assume we just take the pixel.
-         - if `beam_weighting=True` then the average should use the beam response as a weight.
+        By default the returned spectrum is extracted at the pixel closest to
+        the provided coordinates. If ``area`` is set to a positive value, then
+        a beam-shaped area is averaged over, where ``area`` sets the size of
+        this region in number of beams. For example ``area=2.0`` will result
+        in an average over an area twice the size of the beam.
+
+        If an average is averaged over, you can also weight the pixels by the
+        beam response with ``beam_weighting=True``. This will reduce the weight
+        of pixels that are further away from the beam center.
+
+         Finally, to check that you're extracting what you think you are, you
+         can return the mask (and weights) used for the extraction with
+         ``return_mask=True``. Note that if ``beam_weighting=False`` then all
+         ``weights`` will be 1.
+
+         TODO: Check that the returned uncertainties are reasonable.
 
         Args:
-            TBD
+            coords (tuple): The coordinates from where you want to extract a
+                spectrum. Must be a length 2 tuple.
+            x0 (Optional[float]): RA offset in [arcsec].
+            y0 (Optional[float]): Dec offset in [arcsec].
+            inc (Optional[float]): Inclination of source in [deg]. Only
+                required for ``frame='disk'``.
+            PA (Optional[float]): Position angle of source in [deg]. Only
+                required for ``frame='disk'``.
+            frame (Optional[str]): The frame that the ``coords`` are given.
+                Either ``'disk'`` or ``'sky'``.
+            coord_type (Optional[str]): The type of coordinates given, either
+                ``'cartesian'`` or ``'cylindrical'``.
+            area (Optional[float]): The area to average over in units of the
+                beam area. Note that this take into account the beam aspect
+                ratio and position angle. For a single pixel extraction use
+                ``area=0.0``.
+            beam_weighting (Optional[bool]): Whether to use the beam response
+                function to weight the averaging of the spectrum.
+            return_mask (Optional[bool]): Whether to return the mask and
+                weights used to extract the spectrum.
 
-        Retuns:
-            x, y, dy
+        Retuns (if ``return_mask=False``):
+            x, y, dy (arrays): The velocity axis, extracted spectrum and
+            associated uncertainties.
+        (if ``return_mask=True``):
+            mask, weights (arrays): Arrays of the mask used to extract the
+            spectrum and the weighted used for the averaging.
         """
 
         # Convert the input coordinate into on-sky cartesian coordinates
@@ -3129,6 +3166,7 @@ class imagecube(object):
         elif frame.lower() == 'disk':
             x, y = self.disk_to_sky(coords=coords, coord_type=coord_type,
                                     inc=inc, PA=PA, x0=x0, y0=y0)
+        assert x.size == y.size == 1
 
         # Define the area to average over.
 
