@@ -2709,8 +2709,8 @@ class imagecube(object):
         inc = np.radians(inc)
         PA = np.radians(PA - 90.0)
         y_roll = np.cos(inc) * y - np.sin(inc) * z
-        x_sky = np.cos(PA) * x - np.sin(PA) * y_roll
-        y_sky = -np.sin(PA) * x - np.cos(PA) * y_roll
+        x_sky = np.cos(PA) * x - np.sin(PA) * y_roll + x0
+        y_sky = -np.sin(PA) * x - np.cos(PA) * y_roll + y0
         if not return_idx:
             return x_sky, y_sky
         x_pix = np.array([abs(self.xaxis - xx).argmin() for xx in x_sky])
