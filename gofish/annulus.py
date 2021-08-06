@@ -1021,7 +1021,7 @@ class annulus(object):
         # Add the colorbar.
         cb_ax = ax_divider.append_axes('right', size='2%', pad='1%')
         cb = plt.colorbar(im, cax=cb_ax)
-        cb.set_label('Flux Density (Jy/beam)', rotation=270, labelpad=13)
+        cb.set_label('Intensity (Jy/beam)', rotation=270, labelpad=13)
         plt.tight_layout()
 
         if return_fig:
