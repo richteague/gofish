@@ -63,7 +63,8 @@ class imagecube(object):
             self._clip_cube_spatial(FOV/2.0)
         if velocity_range is not None:
             self._clip_cube_velocity(*velocity_range)
-        self._velax_offset = self._calculate_symmetric_velocity_axis()
+        if self.data.ndim == 3:
+            self._velax_offset = self._calculate_symmetric_velocity_axis()
         if self.data.ndim != 3 and self.verbose:
             print("WARNING: Provided cube is only 2D. Shifting not available.")
 
