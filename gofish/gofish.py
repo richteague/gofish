@@ -1700,7 +1700,7 @@ class imagecube(object):
                                                z_func=z_func,
                                                shadowed=shadowed)
         r_min = 0.0 if r_min is None else r_min
-        r_max = rvals.max() if r_max is None else r_max
+        r_max = np.nanmax(rvals) if r_max is None else r_max
         assert r_min < r_max, 'r_min >= r_max'
         r_m = rvals * dist * sc.au
         z_m = 0.0 if cylindrical else zvals * dist * sc.au
