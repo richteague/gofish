@@ -2460,6 +2460,14 @@ class imagecube(object):
         q_taper = 1.0 if q_taper is None else q_taper
         r_cavity = 0.0 if r_cavity is None else r_cavity
 
+        # Faster deprojection for no emission surface.
+        if z0 == 0.0:
+            r, t = self._get_midplane_polar_coords(x0, y0, inc, PA)
+            z = np.zeros(r.shape)
+            if frame == 'cylindrical':
+                return r, t, z
+            return r * np.cos(t), r * np.sin(t), z
+
         if force_positive_surface and force_negative_surface:
             raise ValueError("Cannot force positive and negative surface.")
         if force_positive_surface:
@@ -2770,6 +2778,8 @@ class imagecube(object):
         self.xaxis = self._readpositionaxis(a=1)
         self.yaxis = self._readpositionaxis(a=2)
         self.dpix = np.mean([abs(np.diff(self.xaxis))])
+        self.xaxis -= 0.5*self.dpix
+        self.yaxis -= 0.5*self.dpix
         self.nxpix = self.xaxis.size
         self.nypix = self.yaxis.size
 
