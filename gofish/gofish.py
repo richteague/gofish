@@ -1657,7 +1657,8 @@ class imagecube(object):
                   z1=None, phi=None, z_func=None, r_min=None, r_max=None,
                   cylindrical=False, shadowed=False):
         """
-        Projected Keplerian velocity profile in [m/s].
+        Projected Keplerian velocity profile in [m/s]. For positions outside
+        ``r_min`` and ``r_max`` the values will be set to NaN.
 
         Args:
             inc (float): Inclination of the disk in [degrees].
@@ -2461,7 +2462,7 @@ class imagecube(object):
         r_cavity = 0.0 if r_cavity is None else r_cavity
 
         # Faster deprojection for no emission surface.
-        if z0 == 0.0:
+        if z0 == 0.0 and z_func is None:
             r, t = self._get_midplane_polar_coords(x0, y0, inc, PA)
             z = np.zeros(r.shape)
             if frame == 'cylindrical':
@@ -2751,6 +2752,124 @@ class imagecube(object):
         v1 = self.restframe_frequency_to_velocity(self.nu0 - dnu)
         vB = max(v0, v1) - min(v0, v1)
         return np.mean([vA, vB])
+
+    # -- Masking Functions -- #
+
+    def keplerian_mask(self, inc, PA, dist, mstar, vlsr, x0=0.0, y0=0.0,
+                       z0=0.0, psi=1.0, r_cavity=None, r_taper=None,
+                       q_taper=None, dV0=300.0, dVq=-0.5, r_min=0.0, r_max=4.0,
+                       nbeams=None, tolerance=0.01, restfreqs=None,
+                       max_dz0=0.2, return_type='float'):
+        """
+        Generate a make based on a Keplerian velocity model. Original code from
+        ``https://github.com/richteague/keplerian_mask``. Unlike with the
+        original code, the mask will be built on the same cube grid as the
+        attached data. Multiple lines can be considered at once by providing a
+        list of the rest frequencies of the line.
+
+        Unlike other functions, this does not accept ``z_func``.
+
+        Args:
+            inc (float): Inclination of the disk in [deg].
+            PA (float): Position angle of the disk, measured Eastwards to the
+                red-shifted major axis from North in [deg].
+            dist (float): Distance to source in [pc].
+            mstar (float): Stellar mass in [Msun].
+            vlsr (float): Systemic velocity in [m/s].
+            x0 (Optional[float]): Source right ascension offset in [arcsec].
+            y0 (Optional[float]): Source declination offset in [arcsec].
+            z0 (Optional[float]): Aspect ratio at 1" for the emission surface.
+                To get the far side of the disk, make this number negative.
+            psi (Optional[float]): Flaring angle for the emission surface.
+            r_cavity (Optional[float]): Edge of the inner cavity for the
+                emission surface in [arcsec].
+            r_taper (Optional[float]): Characteristic radius in [arcsec] of the
+                exponential taper to the emission surface.
+            q_taper (Optional[float]): Exponent of the exponential taper of the
+                emission surface.
+            dV0 (Optional[float]): Line Doppler width at 1" in [m/s].
+            dVq (Optional[float]): Powerlaw exponent for the Doppler-width
+                dependence.
+            r_min (Optional[float]): Inner radius to consider in [arcsec].
+            r_max (Optional[float]): Outer radius to consider in [arcsec].
+            nbeams (Optional[float]): Size of convolution kernel to smooth the
+                mask by.
+            tolerance (Optional[float]): After smoothing, the limit used to
+                decide if a pixel is masked or not. Lower values will include
+                more pixels.
+            restfreqs (Optional[list]): Rest frequency (or list of rest
+                frequencies) in [Hz] to allow for multiple (hyper-)fine
+                components.
+            max_dz0 (Optional[float]): The maximum step size between different
+                ``z0`` values used for the different emission heights.
+            return_type (Optional[str]): The value type used for the returned
+                mask, the default is ``'float'``.
+
+        Returns:
+            ndarry:
+                The Keplerian mask with the desired value type.
+        """
+
+        # Define the radial line width profile.
+
+        def dV(r):
+            return dV0 * r**dVq
+
+        # Calculate the different heights that we'll have to use. For this we
+        # use steps of `max_dz0`. The use of `linspace` at the end is to ensure
+        # that the steps in z0 are equal.
+
+        if z0 != 0.0:
+            z0s = np.arange(0.0, z0, max_dz0)
+            z0s = np.append(z0s, z0) if z0s[-1] != z0 else z0s
+            z0s = np.concatenate([-z0s[1:][::-1], z0s])
+            z0s = np.linspace(z0s[0], z0s[-1], z0s.size)
+        else:
+            z0s = np.zeros(1)
+
+        # For each line center we need to loop through the different emission
+        # heights. Each mask is where the line center, ``v_kep``, is within the
+        # local linewidth, ``dV``, and half a channel. We then collapse all the
+        # masks down to a single mask.
+
+        masks = []
+        for _z0 in z0s:
+            for restfreq in np.atleast_1d(restfreqs):
+                offset = self.restframe_frequency_to_velocity(restfreq)
+                rvals = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA,
+                                         z0=_z0, psi=psi, r_cavity=r_cavity,
+                                         r_taper=r_taper, q_taper=q_taper)[0]
+                v_kep = self.keplerian(x0=x0, y0=y0, inc=inc, PA=PA,
+                                       mstar=mstar, dist=dist,
+                                       vlsr=vlsr+offset, z0=_z0,
+                                       psi=psi, r_cavity=r_cavity,
+                                       r_taper=r_taper, q_taper=q_taper,
+                                       r_min=r_min, r_max=r_max)
+                mask = abs(self.velax[:, None, None] - v_kep)
+                masks += [mask < dV(rvals) + self.chan]
+        mask = np.any(masks, axis=0).astype('float')
+        assert mask.shape == self.data.shape, "wrong mask shape"
+
+        # Apply smoothing to the mask to broaden or soften the edges. Anything
+        # that results in a value above ``tolerance`` is assumed to be within
+        # the mask.
+
+        if nbeams:
+            mask = self.convolve_with_beam(mask, scale=float(nbeams))
+        return np.where(mask >= tolerance, 1.0, 0.0).astype(return_type)
+
+    def _string_to_Hz(self, string):
+        """
+        Convert a string to a frequency in [Hz].
+        """
+        if isinstance(string, float):
+            return string
+        if isinstance(string, int):
+            return string
+        factor = {'GHz': 1e9, 'MHz': 1e6, 'kHz': 1e3, 'Hz': 1e0}
+        for key in ['GHz', 'MHz', 'kHz', 'Hz']:
+            if key in string:
+                return float(string.replace(key, '')) * factor[key]
 
     # -- FITS I/O -- #
 
@@ -3095,6 +3214,61 @@ class imagecube(object):
             self.data /= pb[None, :, :]
         self._pb_corrected = True
 
+    def shift_image(self, x0=0.0, y0=0.0, data=None):
+        """
+        Shift the source center of the provided data by ``d0`` [arcsec] and
+        ``y0`` [arcsec] in the x- and y-directions, respectively. The shifting
+        is performed with ``scipy.ndimage.shift`` which uses a third-order
+        spline interpolation.
+
+        Args:
+            x0 (Optional[float]): Shfit along the x-axis in [arcsec].
+            y0 (Optional[float]): Shifta long the y-axis in [arcsec].
+            data (Optional[ndarray]): Data to shift.
+        Returns:
+            ndarray:
+                The shifted array.
+        """
+        from scipy.ndimage import shift
+        data = data.copy() if data is not None else self.data.copy()
+        data = np.where(np.isfinite(data), data, 0.0)
+        y0, x0 = -y0 / self.dpix, x0 / self.dpix
+        if y0 == x0 == 0.0:
+            return data
+        if data.ndim == 3:
+            from tqdm import trange
+            shifted = []
+            for cidx in trange(data.shape[0]):
+                shifted += [shift(data[cidx], [y0, x0])]
+            return np.squeeze(shifted)
+        if data.ndim == 2:
+            return shift(data, [y0, x0])
+
+    def rotate_image(self, PA, data=None):
+        """
+        Rotate the image such that the red-shifted axis aligns with the x-axis.
+
+        Args:
+            PA (float): Position angle of the disk, measured to the red-shifted
+                major axis of the disk, anti-clockwise from North, in [deg].
+            data (Optional[ndarray]): Data to rotate if not the attached data.
+
+        Returns:
+            ndarray:
+                The rotated array.
+        """
+        from scipy.ndimage import rotate
+        data = data if data is not None else self.data
+        data = np.where(np.isfinite(data), data, 0.0)
+        if data.ndim == 3:
+            from tqdm import trange
+            shifted = []
+            for cidx in trange(data.shape[0]):
+                shifted += [rotate(data[cidx], PA - 90.0, reshape=False)]
+            return np.squeeze(shifted)
+        if data.ndim == 2:
+            return rotate(data, PA - 90.0, reshape=False)
+
     @property
     def rms(self):
         """RMS of the cube based on the first and last 5 channels."""
@@ -3207,6 +3381,181 @@ class imagecube(object):
         y = [np.average(c * mask, weights=weights) for c in self.data]
         dy = max(1.0, mask.sum() * self.beams_per_pix)**-0.5 * self.rms
         return self.velax, np.array(y), np.array([dy for _ in y])
+
+    def convolve_with_beam(self, data, scale=1.0, circular=False,
+                           convolve_kwargs=None):
+        """
+        Convolve the attached data with a 2D Gaussian kernel matching the
+        synthesized beam. This can be scaled with ``scale``, or forced to be
+        circular (taking the major axis as the radius of the beam).
+
+        Args:
+            data (ndarray): The data to convolve. Must be either 2D or 3D.
+            scale (Optional[float]): Factor to scale the synthesized beam by.
+            circular (Optional[bool]): Force a cicular kernel. If ``True1``,
+                the kernel will adopt the scaled major axis of the beam to use
+                as the radius.
+            convolve_kwargs (Optional[dict]): Keyword arguments to pass to
+                ``astropy.convolution.convolve``.
+
+        Returns:
+            ndarray:
+                Data convolved with the requested kernel.
+        """
+        from astropy.convolution import convolve, Gaussian2DKernel
+        kw = {} if convolve_kwargs is None else convolve_kwargs
+        kw['preserve_nan'] = kw.pop('preserve_nan', True)
+        kw['boundary'] = kw.pop('boundary', 'fill')
+        bmaj = scale * self.bmaj / self.dpix / 2.355
+        bmin = scale * self.bmin / self.dpix / 2.355
+        kernel = Gaussian2DKernel(x_stddev=bmaj if circular else bmin,
+                                  y_stddev=bmaj, theta=self.bpa)
+        if data.ndim == 3:
+            from tqdm import trange
+            convolved = []
+            for cidx in trange(data.shape[0]):
+                convolved += [convolve(data[cidx], kernel, **kw)]
+            return np.squeeze(convolved)
+        elif data.ndim == 2:
+            return convolve(data, kernel, **kw)
+        else:
+            raise ValueError("`data` must be 2 or 3 dimensional.")
+
+    def cross_section(self, x0=0.0, y0=0.0, PA=0.0, mstar=1.0, dist=100.,
+                      vlsr=None, grid=True, grid_spacing=None, downsample=1,
+                      cylindrical_rotation=False, clip_noise=True, min_npnts=5,
+                      statistic='mean', mask_velocities=None):
+        """
+        Return the cross section of the data following Dutrey et al. (2017).
+        This yields ``I_nu(r, z)``. If ``grid=True`` then this will be gridded
+        using ``scipy.interpolate.griddata`` onto axes with the same pixel
+        spacing as the attached data.
+
+        Reference:
+            Dutrey et al. (2017):
+                https://ui.adsabs.harvard.edu/abs/2017A%26A...607A.130D
+
+        Args:
+            x0 (Optional[float]): Source right ascension offset [arcsec].
+            y0 (Optional[float]): Source declination offset [arcsec].
+            PA (Optional[float]): Position angle of the disk in [deg].
+            mstar (Optional[float]): Mass of the central star in [Msun].
+            dist (Optional[float]): Distance to the source in [pc].
+            vlsr (Optional[float]): Systemic velocity in [m/s]. If ``None``,
+                assumes the central velocity.
+            grid (Optional[bool]): Whether to grid the coordinates to a regular
+                grid. Default is ``True``.
+            grid_spacing (Optional[float]): The spacing, in [arcsec], for the R
+                and Z grids. If ``None`` is provided, will use pixel spacing.
+            downsample (Optional[int]): If provided, downsample the coordinates
+                to grid by this factor to speed up the interpolation for large
+                datasets. Default is ``1``.
+            cylindrical_rotation (Optional[bool]): If ``True``, assume that the
+                Keplerian rotation decreases with height above the midplane.
+            clip_noise (Optional[bool]): If ``True``, remove all pixels which
+                fall below 3 times the standard deviation of the two edge
+                channels. If the argument is a ``float``, use this as the clip
+                level.
+            min_npnts (Optional[int]): Number of minimum points in each bin for
+                the average. Default is 5.
+            statistic (Optional[str]): Statistic to calculate for each bin.
+                Note that the uncertainty returned will only make sense with
+                ``'max'``, ``'mean'`` or ``'median'``.
+            mask_velocities (Optional[list of tuples]): List of
+                ``(v_min, v_max)`` tuples to mask (i.e. remove from the
+                averaging).
+        Returns:
+            ndarray: Either two 1D arrays containing ``(r, z, I_nu)``, or, if
+            ``grid=True``, two 1D arrays with the ``r`` and ``z`` axes and
+            two 2D array of ``I_nu`` and ``dI_nu``.
+        """
+
+        # Pixel coordinates.
+
+        v_sky = np.ones(self.data.shape) * self.velax[:, None, None]
+        x_sky = np.ones(self.data.shape) * self.xaxis[None, None, :]
+        y_sky = np.ones(self.data.shape) * self.yaxis[None, :, None]
+        v_sky -= np.median(self.velax) if vlsr is None else vlsr
+        x_sky *= dist * sc.au
+        y_sky *= dist * sc.au
+
+        # Shift the emission distribution and rotate if the major axis is not
+        # aligned with the x-axis.
+
+        if (x0 == 0.0) & (y0 == 0.0):
+            intensity = self.data.copy()
+        else:
+            intensity = self.shift_center(x0, y0, data=self.data)
+        if not ((PA == 90.0) or PA == (270.0)):
+            intensity = self.rotate_image(PA, data=intensity)
+
+        # Remove the maked velocities pixels.
+        # TODO - Include here the Keplerian masks.
+
+        if mask_velocities:
+            mask = [np.logical_and(self.velax <= v_min, self.velax >= v_max)
+                    for v_min, v_max in np.atleast_2d(mask_velocities)]
+            mask = ~np.any(mask, axis=0)
+            mask = mask[:, None, None] * np.ones(v_sky.shape).astype(bool)
+            x_sky, y_sky, v_sky = x_sky[mask], y_sky[mask], v_sky[mask]
+
+        # Transformation assuming cylindrical rotation.
+
+        R = np.power(sc.G * 1.9891e30 * mstar * (x_sky / v_sky)**2, 2./3.)
+        if not cylindrical_rotation:
+            R -= y_sky**2
+        R = np.sqrt(R) / sc.au / dist
+        Z = y_sky / sc.au / dist
+
+        # Return the raw pixel values if necessary.
+
+        if not grid:
+            return R, Z, I
+
+        # Flatten the data and remove NaNs.
+
+        R, Z, I = R.flatten(), Z.flatten(), I.flatten()
+        mask = np.isfinite(I) & np.isfinite(R)
+        R, Z, I = R[mask], Z[mask], I[mask]
+
+        # Remove noise.
+        if clip_noise:
+            if isinstance(clip_noise, bool):
+                clip_noise = 3.0 * np.nanstd([cube.data[0], cube.data[-1]])
+            mask = I >= clip_noise
+            R, Z, I = R[mask], Z[mask], I[mask]
+
+        # Downsample the data to speed the averaging.
+        # TODO: Check if this is actually necessary.
+
+        if downsample > 1:
+            downsample = int(downsample)
+            R, Z, I = R[::downsample], Z[::downsample], I[::downsample]
+
+        # Define the grids.
+
+        R_grid = cube.xaxis.copy()[cube.xaxis >= 0.0]
+        R_grid = R_grid[np.argsort(R_grid)]
+        if grid_spacing is not None:
+            R_grid = np.arange(0.0, R_grid[-1], grid_spacing)
+        R_bins = cube.radial_sampling(rvals=R_grid)[0]
+        Z_grid = cube.yaxis.copy()
+        if grid_spacing is not None:
+            Z_grid = np.arange(Z_grid[0], Z_grid[-1], grid_spacing)
+        Z_bins = cube.radial_sampling(rvals=Z_grid)[0]
+
+        # Grid the data.
+
+        from scipy.stats import binned_statistic_2d
+        I_grid = binned_statistic_2d(R, Z, I, bins=[R_bins, Z_bins],
+                                     statistic=statistic)[0]
+        dI_grid = binned_statistic_2d(R, Z, I, bins=[R_bins, Z_bins],
+                                      statistic='std')[0]
+        N_pnts = binned_statistic_2d(R, Z, I, bins=[R_bins, Z_bins],
+                                     statistic='count')[0]
+        I_grid = np.where(N_pnts >= min_npnts, I_grid, np.nan)
+        dI_grid = np.where(N_pnts >= min_npnts, dI_grid / N_pnts**0.5, np.nan)
+        return R_grid, Z_grid, I_grid.T, dI_grid.T
 
     # -- Spiral Functions -- #
 
