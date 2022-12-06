@@ -2182,8 +2182,11 @@ class imagecube(object):
         PA_mask = np.logical_and(tvals >= PA_min, tvals <= PA_max)
         PA_mask = ~PA_mask if exclude_PA else PA_mask
 
+        # NaN mask.
+        nan_mask = np.isfinite(self.data)
+
         # Combine and return.
-        mask = r_mask * PA_mask
+        mask = r_mask * PA_mask * nan_mask
         if np.sum(mask) == 0:
             raise ValueError("There are zero pixels in the mask.")
         return mask
