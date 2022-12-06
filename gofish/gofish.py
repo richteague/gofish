@@ -22,8 +22,8 @@ class imagecube(object):
         FOV (Optional[float]): Clip the image cube down to a specific
             field-of-view spanning a range ``FOV``, where ``FOV`` is in
             [arcsec].
-        v_range (Optional[tuple]): A tuple of minimum and maximum velocities
-            to clip the velocity range to.
+        velocity_range (Optional[tuple]): A tuple of minimum and maximum
+            velocities to clip the velocity range to.
         verbose (Optional[bool]): Whether to print out warning messages.
         primary_beam (Optional[str]): Path to the primary beam as a FITS file
             to apply the correction.
@@ -38,7 +38,7 @@ class imagecube(object):
     velocity_units = {'km/s': 1e3, 'm/s': 1e0}
 
     def __init__(self, path, FOV=None, velocity_range=None, verbose=True,
-                 clip=None, primary_beam=None, bunit=None, pixel_scale=None):
+                 primary_beam=None, bunit=None, pixel_scale=None):
 
         # Default parameters for user-defined values.
         self._user_bunit = bunit
@@ -55,10 +55,7 @@ class imagecube(object):
         if primary_beam is not None:
             self.correct_PB(primary_beam)
 
-        if clip is not None:
-            print("WARNING: `clip` is depreciated, use `FOV` instead.")
-            FOV = 2.0 * clip
-
+        # Cut down to a specific field of view.
         if FOV is not None:
             self._clip_cube_spatial(FOV/2.0)
         if velocity_range is not None:
