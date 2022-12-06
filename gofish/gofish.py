@@ -3412,7 +3412,7 @@ class imagecube(object):
         bmaj = scale * self.bmaj / self.dpix / 2.355
         bmin = scale * self.bmin / self.dpix / 2.355
         kernel = Gaussian2DKernel(x_stddev=bmaj if circular else bmin,
-                                  y_stddev=bmaj, theta=self.bpa)
+                                  y_stddev=bmaj, theta=np.radians(self.bpa))
         if data.ndim == 3:
             from tqdm import trange
             convolved = []
