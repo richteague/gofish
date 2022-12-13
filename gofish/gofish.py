@@ -285,7 +285,7 @@ class imagecube(object):
             try:
                 annulus = self.get_annulus(rbins[ridx], rbins[ridx+1],
                                            x0=x0, y0=y0, inc=inc, PA=PA,
-                                           z0=z0, psi=psi, z1=z1, phi=phi,
+                                           z0=z0, psi=psi,
                                            r_taper=r_taper, q_taper=q_taper,
                                            r_cavity=r_cavity, z_func=z_func,
                                            beam_spacing=beam_spacing,
@@ -2179,8 +2179,10 @@ class imagecube(object):
         PA_mask = np.logical_and(tvals >= PA_min, tvals <= PA_max)
         PA_mask = ~PA_mask if exclude_PA else PA_mask
 
-        # NaN mask.
+        # NaN mask (rejects any pixel with a NaN in the spectrum).
         nan_mask = np.isfinite(self.data)
+        if self.data.ndim == 3:
+            nan_mask = np.any(nan_mask, axis=0)
 
         # Combine and return.
         mask = r_mask * PA_mask * nan_mask
