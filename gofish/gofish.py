@@ -67,21 +67,22 @@ class imagecube(object):
 
     # -- Fishing Functions -- #
 
-    def average_spectrum(self, r_min=None, r_max=None, dr=None,
+    def average_spectrum(self, r_min, r_max, inc, PA, mstar, dist, dr=None,
                          PA_min=None, PA_max=None, exclude_PA=False,
-                         abs_PA=False, x0=0.0, y0=0.0, inc=0.0, PA=0.0,
-                         z0=None, psi=None, r_cavity=None, r_taper=None,
-                         q_taper=None, z1=None, phi=None, z_func=None,
-                         mstar=1.0, dist=100., resample=1, beam_spacing=False,
+                         abs_PA=False, x0=0.0, y0=0.0, z0=None, psi=None,
+                         r_cavity=None, r_taper=None, q_taper=None, z_func=None,
+                         resample=1, beam_spacing=False,
                          mask_frame='disk', unit='Jy/beam', mask=None,
-                         skip_empty_annuli=True,
-                         shadowed=False, empirical_uncertainty=False,
+                         skip_empty_annuli=True, shadowed=False,
+                         empirical_uncertainty=False,
                          include_spectral_decorrelation=True,
                          velocity_resolution=1.0):
         """
         Return the averaged spectrum over a given radial range, returning a
         spectrum in units of [Jy/beam] or [K] using the Rayleigh-Jeans
-        approximation.
+        approximation. As the Keplerian rotation of the disk needs to be
+        accounted for, a stellar mass in [Msun] and distance in [pc] must be
+        provided.
 
         The `resample` parameter allows you to resample the
         spectrum at a different velocity spacing (by providing a float
@@ -96,10 +97,13 @@ class imagecube(object):
         by the square root of the number of samples.
 
         Args:
-            r_min (Optional[float]): Inner radius in [arcsec] of the region to
-                integrate.
-            r_max (Optional[float]): Outer radius in [arcsec] of the region to
-                integrate.
+            r_min (float): Inner radius in [arcsec] of the region to average.
+            r_max (float): Outer radius in [arcsec] of the region to average.
+            inc (float): Inclination of the disk in [degrees].
+            PA (float): Position angle of the disk in [degrees], measured
+                east-of-north towards the redshifted major axis.
+            mstar (float): Stellar mass in [Msun].
+            dist (float): Distance to the source in [pc].
             dr (Optional[float]): Width of the annuli to split the integrated
                 region into in [arcsec]. Default is quater of the beam major
                 axis.
@@ -117,20 +121,12 @@ class imagecube(object):
                 [arcsec].
             y0 (Optional[float]): Source center offset along the y-axis in
                 [arcsec].
-            inc (Optional[float]): Inclination of the disk in [degrees].
-            PA (Optional[float]): Position angle of the disk in [degrees],
-                measured east-of-north towards the redshifted major axis.
             z0 (Optional[float]): Emission height in [arcsec] at a radius of
                 1".
             psi (Optional[float]): Flaring angle of the emission surface.
-            z1 (Optional[float]): Correction to emission height at 1" in
-                [arcsec].
-            phi (Optional[float]): Flaring angle correction term.
             z_func (Optional[function]): A function which provides
                 :math:`z(r)`. Note that no checking will occur to make sure
                 this is a valid function.
-            mstar (Optional[float]): Stellar mass in [Msun].
-            dist (Optional[float]): Distance to the source in [pc].
             resample (Optional[float/int]): Resampling parameter for the
                 deprojected spectrum. An integer specifies an average of that
                 many channels, while a float specifies the desired channel
@@ -203,8 +199,7 @@ class imagecube(object):
 
         v_kep = self._keplerian(rpnts=rvals, mstar=mstar, dist=dist, inc=inc,
                                 z0=z0, psi=psi, r_cavity=r_cavity,
-                                r_taper=r_taper, q_taper=q_taper, z1=z1,
-                                phi=phi, z_func=z_func)
+                                r_taper=r_taper, q_taper=q_taper, z_func=z_func)
         v_kep = np.atleast_1d(v_kep)
 
         # Output unit.
@@ -343,7 +338,7 @@ class imagecube(object):
                                          exclude_r=False, PA_min=PA_min,
                                          PA_max=PA_max, exclude_PA=exclude_PA,
                                          abs_PA=abs_PA, x0=x0, y0=y0, inc=inc,
-                                         PA=PA, z0=z0, psi=psi, z1=z1, phi=phi,
+                                         PA=PA, z0=z0, psi=psi,
                                          r_cavity=r_cavity, r_taper=r_taper,
                                          q_taper=q_taper, z_func=z_func,
                                          mask_frame=mask_frame,
@@ -735,20 +730,20 @@ class imagecube(object):
             std = std_new
         return std
 
-    def integrated_spectrum(self, r_min=None, r_max=None, dr=None, x0=0.0,
-                            y0=0.0, inc=0.0, PA=0.0, z0=None, psi=None,
-                            r_cavity=None, r_taper=None, q_taper=None, z1=None,
-                            phi=None, z_func=None, mstar=1.0, dist=100.,
-                            resample=1, beam_spacing=False, PA_min=None,
-                            PA_max=None, exclude_PA=False, abs_PA=False,
-                            mask=None, mask_frame='disk',
-                            empirical_uncertainty=False,
-                            skip_empty_annuli=True,
-                            shadowed=False, velocity_resolution=1.0,
-                            include_spectral_decorrelation=True):
+    def integrated_spectrum(self, r_min, r_max, inc, PA, mstar=None, dist=None,
+        dr=None, x0=0.0, y0=0.0, z0=None, psi=None, r_cavity=None, r_taper=None,
+        q_taper=None, z_func=None, resample=1, beam_spacing=False, PA_min=None,
+        PA_max=None, exclude_PA=False, abs_PA=False, mask=None,
+        mask_frame='disk', empirical_uncertainty=False, skip_empty_annuli=True,
+        shadowed=False, velocity_resolution=1.0,
+        include_spectral_decorrelation=True):
         """
         Return the integrated spectrum over a given radial range, returning a
-        spectrum in units of [Jy].
+        spectrum in units of [Jy]. If a stellar mass and distance are specified
+        then this will split the data into concentric annuli, correcting each
+        annulus for the Keplerian rotation of the disk to generate a more
+        precise measurement. If no stellar mass or distance are given then a
+        simple spatial integration will be used.
 
         The `resample` parameter allows you to resample the
         spectrum at a different velocity spacing (by providing a float
@@ -767,10 +762,13 @@ class imagecube(object):
             the uncertainty, set ``assumed_correlated=False``.
 
         Args:
-            r_min (Optional[float]): Inner radius in [arcsec] of the region to
-                integrate.
-            r_max (Optional[float]): Outer radius in [arcsec] of the region to
-                integrate.
+            r_min (float): Inner radius in [arcsec] of the region to integrate.
+            r_max (float): Outer radius in [arcsec] of the region to integrate.
+            inc (float): Inclination of the disk in [degrees].
+            PA (float): Position angle of the disk in [degrees],
+                measured east-of-north towards the redshifted major axis.
+            mstar (Optional[float]): Stellar mass in [Msun].
+            dist (Optional[float]): Distance to the source in [pc].
             dr (Optional[float]): Width of the annuli to split the
                 integrated region into in [arcsec]. Default is quater of the
                 beam major axis.
@@ -778,9 +776,7 @@ class imagecube(object):
                 [arcsec].
             y0 (Optional[float]): Source center offset along the y-axis in
                 [arcsec].
-            inc (Optional[float]): Inclination of the disk in [degrees].
-            PA (Optional[float]): Position angle of the disk in [degrees],
-                measured east-of-north towards the redshifted major axis.
+
             z0 (Optional[float]): Emission height in [arcsec] at a radius of
                 1".
             psi (Optional[float]): Flaring angle of the emission surface.
@@ -790,8 +786,6 @@ class imagecube(object):
             z_func (Optional[function]): A function which provides
                 :math:`z(r)`. Note that no checking will occur to make sure
                 this is a valid function.
-            mstar (Optional[float]): Stellar mass in [Msun].
-            dist (Optional[float]): Distance to the source in [pc].
             resample(Optional[float/int]): Resampling parameter for the
                 deprojected spectrum. An integer specifies an average of that
                 many channels, while a float specifies the desired channel
@@ -834,20 +828,30 @@ class imagecube(object):
 
         self._test_2D()
 
+        # Check to see if a shift-and-stack approach is required. If so, check
+        # that both `mstar` and `dist` have been provided.
+
+        if mstar is None:
+            return self._integrated_spectrum_basic(r_min=r_min, r_max=r_max,
+                x0=x0, y0=y0, inc=inc, PA=PA, z0=z0, psi=psi, r_cavity=r_cavity,
+                r_taper=r_taper, q_taper=q_taper, z_func=z_func,  PA_min=PA_min,
+                PA_max=PA_max, exclude_PA=exclude_PA, abs_PA=abs_PA, mask=mask,
+                mask_frame=mask_frame)
+        elif dist is None:
+            raise ValueError("Must specify both `mstar` and `dist`.")
+
         # Get average spectrum for the desired region.
 
         x, y, dy = self.average_spectrum(
             r_min=r_min,
             r_max=r_max,
+            inc=inc,
+            PA=PA,
             dr=dr,
             x0=x0,
             y0=y0,
-            inc=inc,
-            PA=PA,
             z0=z0,
             psi=psi,
-            z1=z1,
-            phi=phi,
             r_cavity=r_cavity,
             r_taper=r_taper,
             q_taper=q_taper,
@@ -895,8 +899,6 @@ class imagecube(object):
             PA=PA,
             z0=z0,
             psi=psi,
-            z1=z1,
-            phi=phi,
             r_cavity=r_cavity,
             r_taper=r_taper,
             q_taper=q_taper,
@@ -914,6 +916,80 @@ class imagecube(object):
         else:
             dy *= nbeams
         return x, y, dy
+
+    def _integrated_spectrum_basic(self, r_min, r_max, x0=0.0, y0=0.0, inc=0.0,
+        PA=0.0, z0=None, psi=None, r_cavity=None, r_taper=None, q_taper=None,
+        z_func=None,  PA_min=None, PA_max=None, exclude_PA=False, abs_PA=False,
+        mask=None, mask_frame='disk'):
+        """
+        Simple integrated spectrum which just integrates over a specified area.
+
+        Args:
+            r_min (float): Inner radius in [arcsec] of the region to integrate.
+            r_max (float): Outer radius in [arcsec] of the region to integrate.
+            x0 (Optional[float]): Source center offset along the x-axis in
+                [arcsec].
+            y0 (Optional[float]): Source center offset along the y-axis in
+                [arcsec].
+            inc (Optional[float]): Inclination of the disk in [degrees].
+            PA (Optional[float]): Position angle of the disk in [degrees],
+                measured east-of-north towards the redshifted major axis.
+            z0 (Optional[float]): Emission height in [arcsec] at a radius of
+                1".
+            psi (Optional[float]): Flaring angle of the emission surface.
+            r_taper (Optional[float]): TBD
+            q_taper (Optional[float]): TBD
+            z_func (Optional[function]): A function which provides
+                :math:`z(r)`. Note that no checking will occur to make sure
+                this is a valid function.
+            PA_min (Optional[float]): Minimum polar angle to include in the
+                annulus in [degrees]. Note that the polar angle is measured in
+                the disk-frame, unlike the position angle which is measured in
+                the sky-plane.
+            PA_max (Optional[float]): Maximum polar angleto include in the
+                annulus in [degrees]. Note that the polar angle is measured in
+                the disk-frame, unlike the position angle which is measured in
+                the sky-plane.
+            exclude_PA (Optional[bool]): Whether to exclude pixels where
+                ``PA_min <= PA_pix <= PA_max``.
+            abs_PA (Optional[bool]): If ``True``, take the absolute value of
+                the polar angle such that it runs from 0 [deg] to 180 [deg].
+            mask (Optional[ndarray]): Either a 2D or 3D mask to use when
+                averaging the spectra. This will be used in addition to any
+                geometrically defined mask.
+            mask_frame (Optional[str]): Which frame the radial and azimuthal
+                mask is specified in, either ``'disk'`` or ``'sky'``.
+
+        Returns:
+            The velocity axis of the spectrum, ``velax``, in [m/s], the
+            integrated spectrum, ``spectrum``, and the variance of the velocity
+            bin, ``scatter``. The latter two are in units of [Jy].
+        """
+
+        # Check that user provided mask is the same shape as the data.
+
+        maskA = mask if mask is not None else np.ones(self.data.shape)
+        if self.data.shape != maskA.shape:
+            raise ValueError("`mask` must have same shape as `data`.")
+
+        # Combine with the geometric mask.
+
+        maskB = self.get_mask(r_min=r_min, r_max=r_max, x0=x0, y0=y0, inc=inc,
+            PA=PA, z0=z0, psi=psi, r_cavity=r_cavity, r_taper=r_taper,
+            q_taper=q_taper, z_func=z_func, exclude_r=False, PA_min=PA_min,
+            PA_max=PA_max, exclude_PA=exclude_PA, abs_PA=abs_PA,
+            mask_frame=mask_frame, shadowed=False)
+        
+        maskC = np.where(maskA * maskB[None, :, :], 1, 0)
+        masked_data = self.data.copy() * maskC * self.beams_per_pix
+
+        # Integrate the emission. Uncertainty is sqrt(Nbeams) * RMS.
+
+        flux = np.array([c.sum() for c in masked_data])
+        flux_error = np.sqrt([c.sum() for c in maskC])
+        flux_error *= self.beams_per_pix**1.5 * self.rms
+
+        return self.velax, flux, flux_error
 
     def radial_spectra(self, rvals=None, rbins=None, dr=None, x0=0.0, y0=0.0,
                        inc=0.0, PA=0.0, z0=None, psi=None, r_cavity=None,
