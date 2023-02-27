@@ -3093,8 +3093,6 @@ class imagecube(object):
         self.xaxis = self._readpositionaxis(a=1)
         self.yaxis = self._readpositionaxis(a=2)
         self.dpix = np.mean([abs(np.diff(self.xaxis))])
-        self.xaxis -= 0.5*self.dpix
-        self.yaxis -= 0.5*self.dpix
         self.nxpix = self.xaxis.size
         self.nypix = self.yaxis.size
 
