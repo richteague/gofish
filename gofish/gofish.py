@@ -3241,8 +3241,8 @@ class imagecube(object):
             else:
                 a_del = 1.0 * self._user_pixel_scale
             a_pix = a_len / 2.0 + 0.5
-        axis = (np.arange(a_len) - a_pix + 1.0) * a_del
-        return 3600 * axis
+        axis = 3600.0 * a_del * (np.arange(a_len) - 0.5 * (a_len - 1.0))
+        return axis
 
     def _readrestfreq(self):
         """Read the rest frequency."""
