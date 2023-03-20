@@ -3387,8 +3387,13 @@ class imagecube(object):
         """
         r_dep = np.hypot(self.xaxis[None, :], self.yaxis[:, None])
         rmask = np.logical_and(r_dep >= r_in, r_dep <= r_out)
-        rms = np.concatenate([self.data[:int(N)], self.data[-int(N):]])
-        rms = np.where(rmask[None, :, :], rms, np.nan)
+        if self.data.ndim == 3:
+            rms = np.concatenate([self.data[:int(N)], self.data[-int(N):]])
+            rms = np.where(rmask[None, :, :], rms, np.nan)
+        elif self.data.ndim == 2:
+            rms = np.where(rmask, self.data, np.nan)
+        else:
+            raise ValueError("Unknown data dimension.")
         return np.sqrt(np.nansum(rms**2) / np.sum(np.isfinite(rms)))
 
     def print_RMS(self, N=5, r_in=0.0, r_out=1e10):
