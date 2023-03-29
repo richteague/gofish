@@ -2863,7 +2863,7 @@ class imagecube(object):
             raise ValueError(message)
 
     def disk_to_sky(self, coords, inc, PA, x0=0.0, y0=0.0,
-                    coord_type='cartesian', return_idx=False):
+                    coord_type='cylindrical', return_idx=False):
         """
         Project disk-frame coordinates onto the sky plane. Can return either
         the coordinates (the default return), useful for plotting, or the
