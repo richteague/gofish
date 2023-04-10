@@ -1078,7 +1078,7 @@ class imagecube(object):
         beam_spacing=False, r_min=None, r_max=None, PA_min=None, PA_max=None,
         exclude_PA=None, abs_PA=False, mask_frame='disk', mask=None,
         unit='Jy/beam', shadowed=False, skip_empty_annuli=True,
-        empirical_uncertainty=False):
+        empirical_uncertainty=False, vrad_func=None):
         """
         Return shifted and stacked spectra, over a given spatial region in the
         disk. The averaged spectra can be rescaled by using the ``unit``
@@ -1218,8 +1218,16 @@ class imagecube(object):
             q_taper=q_taper,
             z_func=z_func
             )
-
         v_kep = np.atleast_1d(v_kep)
+
+        # Radial velocity at the annulus centers. Note that positive v_rad are
+        # moving away from the disk center.
+
+        if vrad_func is None:
+            v_rad = np.zeros(v_kep.shape)
+        else:
+            v_rad = vrad_func(rvals)
+        assert v_rad.shape == v_kep.shape
 
         # Output unit.
 
@@ -1275,6 +1283,7 @@ class imagecube(object):
 
                 x, y, dy = annulus.deprojected_spectrum(
                     vrot=v_kep[ridx],
+                    vrad=v_rad[ridx],
                     resample=resample,
                     scatter=True
                     )
@@ -3899,7 +3908,7 @@ class imagecube(object):
                       r_min=None, r_max=None, PA_min=None, PA_max=None,
                       exclude_PA=False, abs_PA=False, mask_frame='disk',
                       mask=None, unit='Jy/beam', pcolormesh_kwargs=None,
-                      shadowed=False):
+                      shadowed=False, vrad_func=None):
         """
         Make a `teardrop` plot. For argument descriptions see
         ``radial_spectra``. For all properties related to ``pcolormesh``,
@@ -3920,7 +3929,7 @@ class imagecube(object):
                                   r_max=r_max, PA_min=PA_min, PA_max=PA_max,
                                   exclude_PA=exclude_PA, abs_PA=abs_PA,
                                   mask_frame=mask_frame, mask=mask, unit=unit,
-                                  shadowed=shadowed)
+                                  shadowed=shadowe, vrad_func=vrad_func)
         rvals, velax, spectra, scatter = out
 
         # Generate the axes.
