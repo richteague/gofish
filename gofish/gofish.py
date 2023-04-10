@@ -77,7 +77,7 @@ class imagecube(object):
         z_func=None, resample=1, beam_spacing=False, mask_frame='disk',
         unit='Jy/beam', mask=None, skip_empty_annuli=True, shadowed=False,
         empirical_uncertainty=False, include_spectral_decorrelation=True,
-        velocity_resolution=1.0):
+        velocity_resolution=1.0, vrad_func=None):
         """
         Return the averaged spectrum over a given radial range, returning a
         spectrum in units of [Jy/beam] or [K] using the Rayleigh-Jeans
@@ -170,6 +170,9 @@ class imagecube(object):
                 correlation length too. Defaults to ``True``.
             velocity_resolution (Optional[float]): Velocity resolution of the
                 data as a fraction of the channel spacing. Defaults to ``1.0``.
+            vrad_func (Optional[callable]): Define any radial velocity component
+                here. Must return a radial velocity in [m/s] for a given radial
+                position in [arcsec].
 
         Returns:
             The velocity axis of the spectrum, ``velax``, in [m/s], the
@@ -210,8 +213,16 @@ class imagecube(object):
             q_taper=q_taper,
             z_func=z_func
             )
-
         v_kep = np.atleast_1d(v_kep)
+
+        # Radial velocity at the annulus centers. Note that positive v_rad are
+        # moving away from the disk center.
+
+        if vrad_func is None:
+            v_rad = np.zeros(v_kep.shape)
+        else:
+            v_rad = vrad_func(rvals)
+        assert v_rad.shape == v_kep.shape
 
         # Output unit.
 
@@ -246,6 +257,7 @@ class imagecube(object):
         # on a similar approach to Yen et al. (2016), but performed
         # numerically such that we can a) take account of any masks and b)
         # estimate the introduced spectral correlation.
+        # TODO: Include the vrad component here.
 
         if include_spectral_decorrelation and not empirical_uncertainty:
             v0_map = self.keplerian(
@@ -331,6 +343,7 @@ class imagecube(object):
 
             try:
                 x, y, dy = annulus.deprojected_spectrum(vrot=v_kep[ridx],
+                                                        vrad=v_rad[ridx],
                                                         resample=resample,
                                                         scatter=True)
             except ValueError:
@@ -766,7 +779,7 @@ class imagecube(object):
         q_taper=None, z_func=None, resample=1, beam_spacing=False, PA_min=None,
         PA_max=None, exclude_PA=False, abs_PA=False, mask=None,
         mask_frame='disk', empirical_uncertainty=False, skip_empty_annuli=True,
-        shadowed=False, velocity_resolution=1.0,
+        shadowed=False, velocity_resolution=1.0, vrad_func=None,
         include_spectral_decorrelation=True):
         """
         Return the integrated spectrum over a given radial range, returning a
@@ -845,6 +858,9 @@ class imagecube(object):
             skip_empty_annuli (Optional[bool]): If ``True``, skip any annuli
                 which are empty (i.e. their masks have zero pixels in). If
                 ``False``, any empty masks will raise a ``ValueError``.
+            vrad_func (Optional[callable]): Define any radial velocity component
+                here. Must return a radial velocity in [m/s] for a given radial
+                position in [arcsec].
 
         Returns:
             The velocity axis of the spectrum, ``velax``, in [m/s], the
@@ -860,6 +876,10 @@ class imagecube(object):
         # that both `mstar` and `dist` have been provided.
 
         if mstar is None:
+
+            if vrad_func is not None:
+                raise ValueError("Must specify `mstar` to use `vrad_func`.")
+
             return self._integrated_spectrum_basic(
                 r_min=r_min,
                 r_max=r_max,
@@ -916,6 +936,7 @@ class imagecube(object):
             velocity_resolution=velocity_resolution,
             include_spectral_decorrelation=include_spectral_decorrelation,
             shadowed=shadowed,
+            vrad_func=vrad_func,
             )
 
         # Calculate the area of the integration region.

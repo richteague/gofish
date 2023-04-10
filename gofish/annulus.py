@@ -716,7 +716,8 @@ class annulus(object):
     def calc_vlos(self, vrot, vrad=0.0):
         """
         Calculate the line of sight velocity for each spectrum given the
-        rotational and radial velocities at the attached polar angles.
+        rotational and radial velocities at the attached polar angles. Here
+        positive `vrad` values are away from the disk center.
 
         Args:
             vrot (float): Projected rotation velocity in [m/s].
@@ -726,7 +727,7 @@ class annulus(object):
             Array of projected line of sight velocities at each polar angle.
         """
         _vrot = vrot * np.cos(self.theta)
-        _vrad = vrad * np.sin(self.theta)
+        _vrad = -vrad * np.sin(self.theta)
         return _vrot + _vrad
 
     def _deprojected_spectra(self, vrot, vrad=0.0):
