@@ -3929,7 +3929,7 @@ class imagecube(object):
                                   r_max=r_max, PA_min=PA_min, PA_max=PA_max,
                                   exclude_PA=exclude_PA, abs_PA=abs_PA,
                                   mask_frame=mask_frame, mask=mask, unit=unit,
-                                  shadowed=shadowe, vrad_func=vrad_func)
+                                  shadowed=shadowed, vrad_func=vrad_func)
         rvals, velax, spectra, scatter = out
 
         # Generate the axes.
