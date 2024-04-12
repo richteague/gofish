@@ -32,16 +32,13 @@ class imagecube(object):
         pixel_scale (Optional[float]): If no axis information is found in the
             header, use this value for the pixel scaling in [arcsec], assuming
             an image centered on 0.0".
-        restfreq (Optional[float]): A user-specified rest-frame frequency in
-            [Hz] that will override the one found in the header.
     """
 
     frequency_units = {'GHz': 1e9, 'MHz': 1e6, 'kHz': 1e3, 'Hz': 1e0}
     velocity_units = {'km/s': 1e3, 'm/s': 1e0}
 
     def __init__(self, path, FOV=None, velocity_range=None, verbose=True,
-                 primary_beam=None, bunit=None, pixel_scale=None,
-                 restfreq=None):
+                 primary_beam=None, bunit=None, pixel_scale=None):
 
         # Default parameters for user-defined values.
 
@@ -52,7 +49,7 @@ class imagecube(object):
 
         # Read in the FITS data.
 
-        self._read_FITS(path, restfreq=restfreq)
+        self._read_FITS(path)
         self.verbose = verbose
 
         # Primary beam correction.
@@ -3102,23 +3099,14 @@ class imagecube(object):
 
     # -- FITS I/O -- #
 
-    def _read_FITS(self, path, restfreq=None):
-        """
-        Reads the data from the FITS file.
-
-        Args:
-            path (str): Path to the FITS file to read the header.
-            restfreq (Optional[float]): A user-specified rest-frame frequency in
-                [Hz] that will override the one found in the header.
-        """
+    def _read_FITS(self, path):
+        """Reads the data from the FITS file."""
 
         # File names.
-
         self.path = os.path.expanduser(path)
         self.fname = self.path.split('/')[-1]
 
         # FITS data.
-
         self.header = fits.getheader(path)
         self.data = np.squeeze(fits.getdata(self.path))
         self.data = np.where(np.isfinite(self.data), self.data, 0.0)
@@ -3132,7 +3120,6 @@ class imagecube(object):
                 self.bunit = input("\t Enter brightness unit: ")
 
         # Position axes.
-
         self.xaxis = self._readpositionaxis(a=1)
         self.yaxis = self._readpositionaxis(a=2)
         self.dpix = np.mean([abs(np.diff(self.xaxis))])
@@ -3140,12 +3127,7 @@ class imagecube(object):
         self.nypix = self.yaxis.size
 
         # Spectral axis.
-
-        if restfreq is None:
-            self.nu0 = self._readrestfreq()
-        else:
-            self.nu0 = restfreq
-
+        self.nu0 = self._readrestfreq()
         try:
             self.velax = self._readvelocityaxis()
             if self.velax.size > 1:
@@ -3169,13 +3151,11 @@ class imagecube(object):
 
         # Check that the data is saved such that increasing indices in x are
         # decreasing in offset counter to the yaxis.
-
         if np.diff(self.xaxis).mean() > 0.0:
             self.xaxis = self.xaxis[::-1]
             self.data = self.data[:, ::-1]
 
         # Beam.
-
         self._read_beam()
 
     def _read_beam(self):
@@ -3295,10 +3275,7 @@ class imagecube(object):
         return axis
 
     def _readrestfreq(self):
-        """
-        Read the rest frequency. If no rest frequency header value is found, it
-        will adopt the frequency used for defining the spectral axis.
-        """
+        """Read the rest frequency."""
         try:
             nu = self.header['restfreq']
         except KeyError:
@@ -3552,9 +3529,6 @@ class imagecube(object):
             corrected_data (array): The correced data if `replace=False`.
         """
         from astropy.convolution import convolve, Box2DKernel
-
-        if self.data.ndim != 2:
-            raise NotImplementedError("Can only smooth 2D images.")
 
         data_tmp = self.data.copy()
 
