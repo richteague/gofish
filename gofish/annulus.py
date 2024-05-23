@@ -737,7 +737,7 @@ class annulus(object):
                          for dv, spectra in zip(vlos, self.spectra)])
 
     def deprojected_spectrum(self, vrot, vrad=0.0, resample=False,
-                             scatter=False):
+                             scatter=False, empirical_uncertainty=True):
         """
         Returns ``(x, y[, dy])`` of the collapsed and deprojected spectrum
         using the provided velocities to deproject the data. Different methods
@@ -765,6 +765,11 @@ class annulus(object):
             resample (optional): Type of resampling to be applied.
             scatter (optional[bool]): If the spectrum is resampled, whether to
                 return the scatter in each velocity bin.
+            empirical_uncertainty (optional[bool]): If ``True`` (default),
+                calculate the uncertainty by an iterative sigma clip. If
+                ``False`` then return the standard error on the mean (i.e., 
+                divide the bin standard deviation by the square root of the bin
+                count). This generally results in an underestimated noise.
 
         Returns:
             A deprojected spectrum, resampled using the provided method.
@@ -773,8 +778,11 @@ class annulus(object):
         vlos = self.calc_vlos(vrot=vrot, vrad=vrad)
         vpnts = self.velax[None, :] - vlos[:, None]
         vpnts, spnts = self._order_spectra(vpnts=vpnts.flatten())
-        return self._resample_spectra(vpnts, spnts, resample=resample,
-                                      scatter=scatter)
+        return self._resample_spectra(vpnts=vpnts,
+                                      spnts=spnts,
+                                      resample=resample,
+                                      scatter=scatter,
+                                      empirical_uncertainty=empirical_uncertainty)
 
     def _line_centroids(self, method='max', spectra=None, velax=None):
         """
@@ -825,7 +833,8 @@ class annulus(object):
         idxs = np.argsort(vpnts)
         return vpnts[idxs], spnts[idxs]
 
-    def _resample_spectra(self, vpnts, spnts, resample=False, scatter=False):
+    def _resample_spectra(self, vpnts, spnts, resample=False, scatter=False,
+                          empirical_uncertainty=True, method='binning'):
         """
         Resample the spectra to a given velocity axis. The scatter is estimated
         as the standard deviation of the bin (note that this is not rescaled by
@@ -841,17 +850,33 @@ class annulus(object):
                 originally supplied velocity axis. If a float, this will
                 describe the spectral resolution of the sampled grid.
             scatter (bool): If True, return the standard deviation in each bin.
-
+            empirical_uncertainty (optional[bool]): If ``True`` (default),
+                calculate the uncertainty by an iterative sigma clip. If
+                ``False`` then return the standard error on the mean (i.e., 
+                divide the bin standard deviation by the square root of the bin
+                count). This generally results in an underestimated noise.
+            method (optional[str]): Method to resample the spectra. Either
+                `'binning'` or `'smoothing'`. Still TODO!!
+            
         Returns:
             x (ndarray): Velocity bin centers.
             y (ndarray): Mean of the bin.
             dy (ndarray/None): Standard error on the mean of the bin.
         """
+
+        if method != 'binning':
+            raise NotImplementedError("Hold your horses!")
+
+        # If no resampling is requested, just return the raw points.
+
         if isinstance(resample, bool):
             if not resample:
                 if not scatter:
                     return vpnts, spnts
                 return vpnts, spnts, np.zeros(vpnts.size)
+            
+        # Otherwise, we decide what sampling we want.
+
         if isinstance(resample, (int, bool)):
             bins = int(self.velax.size * int(resample) + 1)
             bins = np.linspace(self.velax[0], self.velax[-1], bins)
@@ -871,8 +896,45 @@ class annulus(object):
         x = np.average([bins[1:], bins[:-1]], axis=0)
         if not scatter:
             return x, y
-        dy = binned_statistic(vpnts, spnts, statistic='std', bins=bins)[0]
+        if empirical_uncertainty:
+            dy = annulus.estimate_uncertainty(y) * np.ones(y.size)
+        else:
+            N = binned_statistic(vpnts, spnts, statistic='count', bins=bins)[0]
+            dy = binned_statistic(vpnts, spnts, statistic='std', bins=bins)[0]
+            dy /= np.sqrt(N)
         return x, y, dy
+
+    @staticmethod
+    def estimate_uncertainty(a, nsigma=3.0, niter=20):
+        """
+        Estimate the noise by iteratively sigma-clipping. For each iteraction
+        the ``a`` array is masked above ``abs(a) > nsigma * std`` and the
+        standard deviation, ``std`` calculated. This is repeated until either
+        convergence or for ``niter`` iteractions. In some cases, usually with
+        low ``nsigma`` values, the ``std`` will approach zero and all ``a``
+        values are masked, resulting in an NaN. In this case, the function will
+        return the last finite value.
+
+        Args:
+            a (array): Array of data from which to estimate the uncertainty.
+            nsigma (Optional[float]): Factor of the standard devitation above
+                which to mask ``a`` values.
+            niter (Optional[int]): Number of iterations to halt after if
+                convergence is not reached.
+
+        Returns:
+            std (float): Standard deviation of the sigma-clipped data.
+        """
+        if niter < 1:
+            raise ValueError("Must have at least one iteration.")
+        nonzero = a != 0.0
+        std = np.nanmax(a)
+        for _ in range(niter):
+            std_new = np.nanstd(a[(abs(a) <= nsigma * std) & nonzero])
+            if std_new == std or np.isnan(std_new) or std_new == 0.0:
+                return std
+            std = std_new
+        return std
 
     def _get_masked_spectrum(self, x, y):
         """Return the masked spectrum for fitting."""

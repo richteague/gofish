@@ -1071,7 +1071,7 @@ class imagecube(object):
 
         flux = np.array([c.sum() for c in masked_data])
         flux_error = np.sqrt([c.sum() for c in maskC])
-        flux_error *= self.beams_per_pix**1.5 * self.rms
+        flux_error *= self.beams_per_pix**0.5 * self.rms
 
         return self.velax, flux, flux_error
 
