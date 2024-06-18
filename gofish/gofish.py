@@ -2409,10 +2409,16 @@ class imagecube(object):
             z_func = None
 
         # Calculate pixel coordaintes.
-        rvals, tvals = self.disk_coords(x0=x0, y0=y0, inc=inc, PA=PA, z0=z0,
+        rvals, tvals = self.disk_coords(x0=x0,
+                                        y0=y0,
+                                        inc=inc,
+                                        PA=PA,
+                                        z0=z0,
                                         psi=psi,
-                                        r_cavity=r_cavity, r_taper=r_taper,
-                                        q_taper=q_taper, z_func=z_func,
+                                        r_cavity=r_cavity,
+                                        r_taper=r_taper,
+                                        q_taper=q_taper,
+                                        z_func=z_func,
                                         frame='cylindrical',
                                         shadowed=shadowed)[:2]
         tvals = abs(tvals) if abs_PA else tvals
@@ -2484,12 +2490,10 @@ class imagecube(object):
         return rbins, rvals
 
     def background_residual(self, x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=None,
-                            psi=None, r_cavity=None, r_taper=None,
-                            q_taper=None, z_func=None,
-                            r_min=None, r_max=None, PA_min=None, PA_max=None,
-                            exclude_PA=False, abs_PA=False, mask_frame='disk',
-                            interp1d_kw=None, background_only=False,
-                            shadowed=False):
+            psi=None, r_cavity=None, r_taper=None, q_taper=None, z_func=None,
+            r_min=None, r_max=None, PA_min=None, PA_max=None, exclude_PA=False,
+            abs_PA=False, mask_frame='disk', interp1d_kw=None,
+            background_only=False, shadowed=False):
         """
         Return the residual from an azimuthally avearged background. This is
         most appropriate for exploring azimuthally asymmetric emission in
