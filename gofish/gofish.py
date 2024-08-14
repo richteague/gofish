@@ -777,13 +777,13 @@ class imagecube(object):
             std = std_new
         return std
 
-    def integrated_spectrum(self, r_min, r_max, inc, PA, mstar=None, dist=None,
-        dr=None, x0=0.0, y0=0.0, z0=None, psi=None, r_cavity=None, r_taper=None,
-        q_taper=None, z_func=None, resample=1, beam_spacing=False, PA_min=None,
-        PA_max=None, exclude_PA=False, abs_PA=False, mask=None,
-        mask_frame='disk', empirical_uncertainty=False, skip_empty_annuli=True,
-        shadowed=False, velocity_resolution=1.0, vrad_func=None,
-        include_spectral_decorrelation=True):
+    def integrated_spectrum(self, r_min=None, r_max=None, inc=None, PA=None,
+        mstar=None, dist=None, dr=None, x0=0.0, y0=0.0, z0=None, psi=None,
+        r_cavity=None, r_taper=None, q_taper=None, z_func=None, resample=1,
+        beam_spacing=False, PA_min=None, PA_max=None, exclude_PA=False,
+        abs_PA=False, mask=None, mask_frame='disk', empirical_uncertainty=False,
+        skip_empty_annuli=True, shadowed=False, velocity_resolution=1.0,
+        vrad_func=None, include_spectral_decorrelation=True):
         """
         Return the integrated spectrum over a given radial range, returning a
         spectrum in units of [Jy]. If a stellar mass and distance are specified
@@ -985,16 +985,18 @@ class imagecube(object):
             dy *= nbeams
         return x, y, dy
 
-    def _integrated_spectrum_basic(self, r_min, r_max, x0=0.0, y0=0.0, inc=0.0,
-        PA=0.0, z0=None, psi=None, r_cavity=None, r_taper=None, q_taper=None,
-        z_func=None,  PA_min=None, PA_max=None, exclude_PA=False, abs_PA=False,
-        mask=None, mask_frame='disk'):
+    def _integrated_spectrum_basic(self, r_min=None, r_max=None, x0=0.0, y0=0.0,
+        inc=0.0, PA=0.0, z0=None, psi=None, r_cavity=None, r_taper=None,
+        q_taper=None, z_func=None,  PA_min=None, PA_max=None, exclude_PA=False,
+        abs_PA=False, mask=None, mask_frame='disk'):
         """
         Simple integrated spectrum which just integrates over a specified area.
 
         Args:
-            r_min (float): Inner radius in [arcsec] of the region to integrate.
-            r_max (float): Outer radius in [arcsec] of the region to integrate.
+            r_min (Optional[float]): Inner radius in [arcsec] of the region to
+                integrate. Defaults to 0 arcseconds.
+            r_max (Optional[float]): Outer radius in [arcsec] of the region to
+                integrate. Defaults to the maximum x-axis value.
             x0 (Optional[float]): Source center offset along the x-axis in
                 [arcsec].
             y0 (Optional[float]): Source center offset along the y-axis in
@@ -1033,6 +1035,19 @@ class imagecube(object):
             integrated spectrum, ``spectrum``, and the variance of the velocity
             bin, ``scatter``. The latter two are in units of [Jy].
         """
+
+        # If the inner and outer values are not specified, assume the full
+        # field of view is wanted. Similarly, if the inclination and position
+        # angle aren't specified, assume they don't matter.
+
+        if r_min is None:
+            r_min = 0.0
+        if r_max is None:
+            r_max = self.xaxis.max()
+        if inc is None:
+            inc = 0.0
+        if PA is None:
+            PA = 0.0
 
         # Check that user provided mask is the same shape as the data.
 
@@ -1917,6 +1932,10 @@ class imagecube(object):
                 output = save
             else:
                 output = self.path.replace('.fits', '_shifted.fits')
+            if self._flipped_spectral_axis:
+                output = output[::-1]
+            if self._flipped_x_axis:
+                output = output[:, ::-1]
             fits.writeto(output, shifted.astype('float32'), self.header)
 
         return shifted
@@ -3162,6 +3181,9 @@ class imagecube(object):
                 self.velax = self.velax[::-1]
                 self.freqax = self.freqax[::-1]
                 self.chan *= -1.0
+                self._flipped_spectral_axis = True
+            else:
+                self._flipped_spectral_axis = False
         except KeyError:
             self.velax = None
             self.chan = None
@@ -3177,6 +3199,9 @@ class imagecube(object):
         if np.diff(self.xaxis).mean() > 0.0:
             self.xaxis = self.xaxis[::-1]
             self.data = self.data[:, ::-1]
+            self._flipped_x_axis = True
+        else:
+            self._flipped_x_axis = False
 
         # Beam.
 
