@@ -1933,9 +1933,9 @@ class imagecube(object):
             else:
                 output = self.path.replace('.fits', '_shifted.fits')
             if self._flipped_spectral_axis:
-                output = output[::-1]
+                shifted = shifted[::-1]
             if self._flipped_x_axis:
-                output = output[:, ::-1]
+                shifted = shifted[:, ::-1]
             fits.writeto(output, shifted.astype('float32'), self.header)
 
         return shifted
