@@ -943,6 +943,8 @@ class imagecube(object):
             )
 
         # Calculate the area of the integration region.
+        # Note that _mask_A is the user-defined mask which can be any shape.
+        # _mask_B is a geometric mask defined by the input parameters.
 
         if mask is not None:
             if mask.shape != self.data.shape:
@@ -951,7 +953,7 @@ class imagecube(object):
                 mask = np.ones(self.data.shape) * mask[None, :, :]
             _mask_A = np.any(mask, axis=0)
         else:
-            _mask_A = np.ones(self.data[0].shape)
+            _mask_A = np.where(np.isfinite(self.data), 1, 0)
 
         _mask_B = self.get_mask(
             r_min,
