@@ -2830,9 +2830,14 @@ class imagecube(object):
         """
 
         # Make the disk-frame coordinates.
+        # Note we make sure all zdisk values are finite by converting all NaNs
+        # to zero values. The user would ideally be providing functions which
+        # didn't return NaNs here...
+
         diskframe_coords = self._get_diskframe_coords(extend, oversample)
         xdisk, ydisk, rdisk, tdisk = diskframe_coords
         zdisk = z_func(rdisk)
+        zdisk = np.where(np.isfinite(zdisk), zdisk, 0.0)
 
         # Incline the disk.
         inc = np.radians(inc)
