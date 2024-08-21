@@ -244,16 +244,21 @@ class imagecube(object):
         # the number of pixels by considering any pixels which has at least one
         # finite value in the spectrum.
 
+        saved_data = self.data.copy()
         if mask is not None:
             if mask.shape != self.data.shape:
                 if mask.shape != self.data.shape[1:]:
                     raise ValueError("Unknown mask shape.")
                 mask = np.ones(self.data.shape) * mask[None, :, :]
-            saved_data = self.data.copy()
-            self.data = np.where(mask, self.data, np.nan)
-            user_mask = np.any(np.isfinite(self.data), axis=0)
         else:
-            user_mask = np.ones(self.data[0].shape)
+            mask = np.ones(self.data.shape)
+
+        # Include masking of any values which are NaN or 0.0. Note that when
+        # GoFish reads in data, it will convert all NaN values to 0.0.
+
+        mask = mask * np.logical_and(self.data != 0.0, np.isfinite(self.data))
+        self.data = np.where(mask, self.data, np.nan)
+        user_mask = np.any(mask, axis=0)
 
         # Calculate the number of independent samples for each pixel after
         # accounting for the spectral deprojection of the data. This is based
@@ -395,8 +400,7 @@ class imagecube(object):
 
         # Return the data to it's saved state (i.e. removing the masked NaNs).
 
-        if mask is not None:
-            self.data = saved_data
+        self.data = saved_data
 
         # Check that the velocity axes are the same. If not, regrid them to the
         # same velocity axis. TODO: Include a flux-preserving algorithm here.
@@ -788,9 +792,10 @@ class imagecube(object):
         Return the integrated spectrum over a given radial range, returning a
         spectrum in units of [Jy]. If a stellar mass and distance are specified
         then this will split the data into concentric annuli, correcting each
-        annulus for the Keplerian rotation of the disk to generate a more
-        precise measurement. If no stellar mass or distance are given then a
-        simple spatial integration will be used.
+        annulus for the Keplerian rotation of the disk to generate a spectrum
+        where the lines should be aligned to remove the double-peak profile
+        typical of rotating sources. If no stellar mass or distance are given
+        then a simple spatial integration will be used.
 
         The `resample` parameter allows you to resample the
         spectrum at a different velocity spacing (by providing a float
@@ -871,7 +876,8 @@ class imagecube(object):
             bin, ``scatter``. The latter two are in units of [Jy].
 
         """
-        # Check is cube is 2D.
+
+        # Check is cube is 2D. If it is, fail as we can't integrated a 2D cube.
 
         self._test_2D()
 
@@ -944,16 +950,21 @@ class imagecube(object):
 
         # Calculate the area of the integration region.
         # Note that _mask_A is the user-defined mask which can be any shape.
-        # _mask_B is a geometric mask defined by the input parameters.
+        # This checks to see if it is the same shape as the data, or a channel.
+        # If the latter, it is broadcast to be the same shape as the data.
 
         if mask is not None:
             if mask.shape != self.data.shape:
                 if mask.shape != self.data.shape[1:]:
                     raise ValueError("Unknown mask shape.")
-                mask = np.ones(self.data.shape) * mask[None, :, :]
-            _mask_A = np.any(mask, axis=0)
+                _mask_A = np.ones(self.data.shape) * mask[None, :, :]
+            else:
+                _mask_A = mask
         else:
-            _mask_A = np.where(np.isfinite(self.data), 1, 0)
+            _mask_A = np.ones(self.data.shape)
+
+        # _mask_B is a geometric mask defined by the input parameters.
+        # This will only ever be 2D as it does have a spectral dependence.
 
         _mask_B = self.get_mask(
             r_min,
@@ -977,14 +988,23 @@ class imagecube(object):
             shadowed=shadowed,
             )
 
-        # Rescale from Jy/beam to Jy and return.
+        # Third mask will be the non-zero positive values.
 
-        nbeams = self.beams_per_pix * np.sum(_mask_A * _mask_B)
+        _mask_C = np.logical_and(np.isfinite(self.data), self.data != 0.0)
+
+        # Rescale from Jy/beam to Jy based on the number of non-masked pixels.
+
+        npix = np.sum(_mask_A * _mask_B[None, :, :] * _mask_C, axis=(-1, -2))
+        nbeams = self.beams_per_pix * npix
+
         y *= nbeams
         if empirical_uncertainty:
             dy = imagecube.estimate_uncertainty(y) * np.ones(y.size)
         else:
             dy *= nbeams
+
+        # Return the values.
+
         return x, y, dy
 
     def _integrated_spectrum_basic(self, r_min=None, r_max=None, x0=0.0, y0=0.0,
@@ -992,7 +1012,8 @@ class imagecube(object):
         q_taper=None, z_func=None,  PA_min=None, PA_max=None, exclude_PA=False,
         abs_PA=False, mask=None, mask_frame='disk'):
         """
-        Simple integrated spectrum which just integrates over a specified area.
+        Simple integrated spectrum which just integrates over a specified area
+        and returns the value in [Jy].
 
         Args:
             r_min (Optional[float]): Inner radius in [arcsec] of the region to
@@ -1051,13 +1072,19 @@ class imagecube(object):
         if PA is None:
             PA = 0.0
 
-        # Check that user provided mask is the same shape as the data.
+        # User-provided mask.
 
-        maskA = mask if mask is not None else np.ones(self.data.shape)
-        if self.data.shape != maskA.shape:
-            raise ValueError("`mask` must have same shape as `data`.")
+        if mask is not None:
+            if mask.shape != self.data.shape:
+                if mask.shape != self.data.shape[1:]:
+                    raise ValueError("Unknown mask shape.")
+                maskA = np.ones(self.data.shape) * mask[None, :, :]
+            else:
+                maskA = mask
+        else:
+            maskA = np.ones(self.data.shape)
 
-        # Combine with the geometric mask.
+        # Geometric mask.
 
         maskB = self.get_mask(
             r_min=r_min,
@@ -1081,16 +1108,27 @@ class imagecube(object):
             shadowed=False
             )
         
-        maskC = np.where(maskA * maskB[None, :, :], 1, 0)
-        masked_data = self.data.copy() * maskC * self.beams_per_pix
+        # NaN / Zero intensity mask.
+
+        maskC = np.where(np.logical_and(np.isfinite(self.data), self.data != 0.0), 1.0, 0.0)
+
+        # Combine the masks.
+
+        maskD = np.where(maskA * maskB[None, :, :] * maskC, 1.0, 0.0)
+        masked_data = self.data.copy() * maskD * self.beams_per_pix
 
         # Integrate the emission. Uncertainty is sqrt(Nbeams) * RMS.
 
         flux = np.array([c.sum() for c in masked_data])
-        flux_error = np.sqrt([c.sum() for c in maskC])
+        flux_error = np.sqrt([c.sum() for c in maskD])
         flux_error *= self.beams_per_pix**0.5 * self.rms
 
-        return self.velax, flux, flux_error
+        # Ratio of the user + geometric mask vs the NaNs.
+
+        rescale = np.sum(maskA * maskB[None, :, :], axis=(-1, -2))
+        rescale /= np.sum(maskD, axis=(-1, -2))
+
+        return self.velax, flux * rescale, flux_error
 
     def radial_spectra(self, rvals=None, rbins=None, dr=None, x0=0.0, y0=0.0,
         inc=0.0, PA=0.0, z0=None, psi=None, r_cavity=None, r_taper=None,
@@ -1220,7 +1258,7 @@ class imagecube(object):
         if rbins.size < 2:
             raise ValueError("Unable to infer suitable `rbins`.")
 
-        # Goign to copy a lot of the code from `average_spectrum`, but this is
+        # Going to copy a lot of the code from `average_spectrum`, but this is
         # because we want to fix the radial gridding and it is unclear if that
         # will be fully respected with `average_spectrum`.
 
@@ -1840,7 +1878,7 @@ class imagecube(object):
     def shifted_cube(self, inc, PA, x0=0.0, y0=0.0, z0=None, psi=None,
         r_cavity=None, r_taper=None, q_taper=None, z_func=None, mstar=None,
         dist=None, vmod=None, r_min=None, r_max=None, fill_val=np.nan,
-        save=False, shadowed=False):
+        save=False, shadowed=False, overwrite=False):
         """
         Apply the velocity shift to each pixel and return the cube, or save as
         as new FITS file. This would be useful if you want to create moment
@@ -1866,6 +1904,8 @@ class imagecube(object):
                 line of sight velocity in [m/s] for a radius given in [m/s].
             r_min (Optional[float]): The inner radius in [arcsec] to shift.
             r_max (Optional[float]): The outer radius in [arcsec] to shift.
+            overwrite (Optional[bool]): Whether to overwrite any files with the
+                same filename.
 
         Returns:
             The shifted data cube.
@@ -1938,7 +1978,8 @@ class imagecube(object):
                 shifted = shifted[::-1]
             if self._flipped_x_axis:
                 shifted = shifted[:, ::-1]
-            fits.writeto(output, shifted.astype('float32'), self.header)
+            fits.writeto(output, shifted.astype('float32'), self.header,
+                         overwrite=overwrite)
 
         return shifted
 
