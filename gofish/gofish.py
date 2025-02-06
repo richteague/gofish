@@ -52,8 +52,8 @@ class imagecube(object):
 
         # Read in the FITS data.
 
-        self._read_FITS(path, restfreq=restfreq)
         self.verbose = verbose
+        self._read_FITS(path, restfreq=restfreq)
 
         # Primary beam correction.
 
@@ -993,8 +993,13 @@ class imagecube(object):
         _mask_C = np.logical_and(np.isfinite(self.data), self.data != 0.0)
 
         # Rescale from Jy/beam to Jy based on the number of non-masked pixels.
+        # We'll need to linearly interpolate this mask into the new velocity
+        # grid if `resample` is provided. It's fast enough to do this regardless
+        # of what the `resample` value is.
 
         npix = np.sum(_mask_A * _mask_B[None, :, :] * _mask_C, axis=(-1, -2))
+        npix = np.round(np.interp(x, self.velax, npix))
+
         nbeams = self.beams_per_pix * npix
 
         y *= nbeams
@@ -3199,7 +3204,8 @@ class imagecube(object):
             if self._user_bunit is not None:
                 self.bunit = self._user_bunit
             else:
-                print("WARNING: Not `bunit` header keyword found.")
+                if self.verbose:
+                    print("WARNING: No `bunit` header keyword found.")
                 self.bunit = input("\t Enter brightness unit: ")
 
         # Position axes.
@@ -3269,7 +3275,8 @@ class imagecube(object):
             self.beamarea_arcsec = self._calculate_beam_area_arcsec()
             self.beamarea_str = self._calculate_beam_area_str()
         except Exception:
-            print("WARNING: No beam values found. Assuming pixel as beam.")
+            if self.verbose:
+                print("WARNING: No beam values found. Assuming pixel as beam.")
             self.bmaj = self.dpix
             self.bmin = self.dpix
             self.bpa = 0.0
@@ -4203,6 +4210,8 @@ class imagecube(object):
         # Draw the contours. The azimuthal angles are drawn on individually to
         # avoid having overlapping lines about the +\- pi boundary making a
         # particularly thick line.
+
+        # TODO: Check if the user has provided 'levels' or not.
 
         kw = {} if contour_kwargs is None else contour_kwargs
         kw['levels'] = kw.pop('levels', np.arange(0.5 * self.bmaj,
