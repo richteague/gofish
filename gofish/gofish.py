@@ -3874,11 +3874,11 @@ class imagecube(object):
         # aligned with the x-axis.
 
         if (x0 == 0.0) & (y0 == 0.0):
-            intensity = self.data.copy()
+            I = self.data.copy()
         else:
-            intensity = self.shift_center(x0, y0, data=self.data)
+            I = self.shift_image(x0, y0, data=self.data)
         if not ((PA == 90.0) or PA == (270.0)):
-            intensity = self.rotate_image(PA, data=intensity)
+            I = self.rotate_image(PA, data=I)
 
         # Remove the maked velocities pixels.
         # TODO - Include here the Keplerian masks.
