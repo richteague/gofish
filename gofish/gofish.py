@@ -1491,10 +1491,10 @@ class imagecube(object):
     def radial_profile(self, rvals=None, rbins=None, dr=None,
         unit='Jy/beam m/s', x0=0.0, y0=0.0, inc=0.0, PA=0.0, z0=0.0, psi=1.0,
         r_cavity=0.0, r_taper=np.inf, q_taper=1.0, z_func=None, mstar=0.0,
-        dist=100., resample=1, beam_spacing=False, r_min=None, r_max=None,
-        PA_min=None, PA_max=None, exclude_PA=False, abs_PA=False,
+        dist=100., mu=28, resample=1, beam_spacing=False, r_min=None, 
+        r_max=None, PA_min=None, PA_max=None, exclude_PA=False, abs_PA=False,
         mask_frame='disk', mask=None, velo_range=None, assume_correlated=True,
-        shadowed=False):
+        shadowed=False, major_axis=False, beam_correction=False):
         """
         Generate a radial profile from shifted and stacked spectra. There are
         different ways to collapse the spectrum into a single value using the
@@ -1557,6 +1557,7 @@ class imagecube(object):
                 this is a valid function.
             mstar (Optional[float]): Stellar mass in [Msun].
             dist (Optional[float]): Distance to the source in [pc].
+            mu (Optional[float]): Mean molecular mass in [amu].
             resample(Optional[float/int]): Resampling parameter for the
                 deprojected spectrum. An integer specifies an average of that
                 many channels, while a float specifies the desired channel
@@ -1591,15 +1592,22 @@ class imagecube(object):
             shadowed (Optional[bool]): If ``True``, use a slower algorithm for
                 deprojecting the pixel coordinates into disk-center coordiantes
                 which can handle shadowed pixels.
+            major_axis (Optional[bool]): If ``True``, only extract along the 
+                major axis.
+            beam_correction (Optional[bool]): If ``True``, correct radial 
+                intensity profile for beam dilution.
 
         Returns:
             Arrays of the bin centers in [arcsec], the profile value in the
             requested units and the associated uncertainties.
         """
+        if beam_correction and not major_axis:
+            print("WARNING: Extracting along the major axis because " +
+                  "the beam correction is in use.")
+            major_axis=True
 
         # If the data is only 2D, we assume this is either a moment map or a
         # continuum image and so can revert to the 2D approach.
-
         if self.data.ndim == 2:
             return self._radial_profile_2D(
                 rvals=rvals,
@@ -1615,6 +1623,9 @@ class imagecube(object):
                 r_taper=r_taper,
                 q_taper=q_taper,
                 z_func=z_func,
+                mstar=mstar,
+                dist=dist,
+                mu=mu,
                 r_min=r_min,
                 r_max=r_max,
                 PA_min=PA_min,
@@ -1623,14 +1634,21 @@ class imagecube(object):
                 exclude_PA=exclude_PA,
                 mask_frame=mask_frame,
                 assume_correlated=assume_correlated,
-                shadowed=shadowed
+                shadowed=shadowed,
+                major_axis=major_axis,
+                beam_correction=beam_correction,
                 )
+
 
         # Otherwise we want to grab the shifted and stacked spectra over the
         # given range. We parse the desired unit into a flux component and a
         # spectral component. The latter is only needed for any integration.
 
         _flux_unit, _velo_unit = imagecube._parse_unit(unit)
+
+        if major_axis:
+            PA_min = np.nanmax(-10, PA_min)
+            PA_max = np.nanmin(10, PA_max)
 
         rvals, velax, spectra, scatter = self.radial_spectra(
             rvals=rvals,
@@ -1658,7 +1676,7 @@ class imagecube(object):
             abs_PA=abs_PA,
             mask_frame=mask_frame,
             mask=mask,
-            unit=_flux_unit, shadowed=shadowed
+            unit=_flux_unit, shadowed=shadowed,
             )
 
         # Cut down the spectra to the correct velocity range. Find the channels
@@ -1708,6 +1726,28 @@ class imagecube(object):
             raise ValueError("Mismatch in rvals and profile shape.")
         if profile.shape != sigma.shape:
             raise ValueError("Mismatch in profile and sigma shape.")
+        
+        if beam_correction:
+            if _velo_unit != None:
+                raise ValueError("Velocity unit must be none for beam correction.")
+            if _flux_unit != 'jy/beam':
+                raise ValueError("Intensity unit must be Jy/beam for beam correction.")
+            profile, sigma = self.correct_beam_dilution(
+                    rvals=rvals, 
+                    ravgs=profile, 
+                    rstds=sigma, 
+                    inc=inc, 
+                    PA=PA,
+                    z0=z0, 
+                    psi=psi,
+                    r_cavity=r_cavity, 
+                    r_taper=r_taper, 
+                    q_taper=q_taper, 
+                    z_func=z_func, 
+                    mstar=mstar,
+                    dist=dist,
+                    mu=mu)
+
         return rvals, profile, sigma
 
     def _parse_channel(self, unit):
@@ -1773,9 +1813,10 @@ class imagecube(object):
 
     def _radial_profile_2D(self, rvals=None, rbins=None, dr=None, x0=0.0,
         y0=0.0, inc=0.0, PA=0.0, z0=None, psi=None, r_cavity=None, r_taper=None,
-        q_taper=None, z_func=None, r_min=None, r_max=None, PA_min=None,
-        PA_max=None, exclude_PA=False, abs_PA=False, mask_frame='disk',
-        assume_correlated=False, percentiles=False, shadowed=False):
+        q_taper=None, z_func=None, mstar=None, dist=None, mu=28, r_min=None, 
+        r_max=None, PA_min=None, PA_max=None, exclude_PA=False, abs_PA=False, 
+        mask_frame='disk', assume_correlated=False, percentiles=False, 
+        shadowed=False, major_axis=False, beam_correction=False):
         """
         Returns the radial profile if `self.data.ndim == 2`, i.e., if shifting
         cannot be performed. Uses all the same parameters, but does not do any
@@ -1797,6 +1838,7 @@ class imagecube(object):
             print("WARNING: Attached data is not 3D, so shifting cannot be " +
                   "applied.\n\t Reverting to standard azimuthal averaging; " +
                   "will ignore `unit` argument.")
+
 
         # Calculate the mask.
 
@@ -1827,6 +1869,45 @@ class imagecube(object):
             shadowed=shadowed
             )
 
+        if major_axis:
+            major_axis_red = self.get_mask(
+                r_min=rbins[0],
+                r_max=rbins[-1],
+                PA_min=-5,
+                PA_max=5,
+                mask_frame='disk',
+                x0=x0,
+                y0=y0,
+                inc=inc,
+                PA=PA,
+                z0=z0,
+                psi=psi,
+                r_cavity=r_cavity,
+                r_taper=r_taper,
+                q_taper=q_taper,
+                z_func=z_func,
+                shadowed=shadowed
+                )
+            major_axis_blue = self.get_mask(
+                r_min=rbins[0],
+                r_max=rbins[-1],
+                PA_min=180-5,
+                PA_max=180+5,
+                mask_frame='disk',
+                x0=x0,
+                y0=y0,
+                inc=inc,
+                PA=PA,
+                z0=z0,
+                psi=psi,
+                r_cavity=r_cavity,
+                r_taper=r_taper,
+                q_taper=q_taper,
+                z_func=z_func,
+                shadowed=shadowed
+                )
+            major_axis_mask = np.any([major_axis_red, major_axis_blue], axis=0)
+            mask = np.all([mask, major_axis_mask], axis=0)
         if mask.shape != self.data.shape:
             raise ValueError("Mismatch in mask and data shape.")
         mask = mask.flatten()
@@ -1878,7 +1959,114 @@ class imagecube(object):
                               for r in range(1, rbins.size)])
             rstds /= np.sqrt(nbeams)
 
+        if beam_correction:
+            ravgs, rstds = self.correct_beam_dilution(
+                    rvals=rvals, 
+                    ravgs=ravgs, 
+                    rstds=rstds, 
+                    inc=inc, 
+                    PA=PA,
+                    z0=z0, 
+                    psi=psi,
+                    r_cavity=r_cavity, 
+                    r_taper=r_taper, 
+                    q_taper=q_taper, 
+                    z_func=z_func, 
+                    mstar=mstar,
+                    dist=dist,
+                    mu=mu)
+
         return rvals, ravgs, rstds
+
+    def correct_beam_dilution(self, rvals, ravgs, rstds, inc, PA, z0=None, psi=None, 
+        r_cavity=None, r_taper=None, q_taper=None, z_func=None, mstar=None, 
+        dist=None, mu=28):
+        """
+        Correct a radial intensity for beam dilution, according to the method 
+        described in Fehr & Andrews 2025
+        
+        Args:
+            rvals (floats): Array of bin centres for the profile in [arcsec].
+            ravgs (floats): Array of intensities evaluated at rvals in [jy/beam].
+            rstds (floats): Array of uncertainties on ravgs in [jy/beam]
+            inc (float): Inclination of the disk in [degrees].
+            PA (float): Position angle of the disk in [degrees], measured 
+                east-of-north towards the redshifted major axis.
+            z0 (Optional[float]): Emission height in [arcsec] at a radius of
+                1".
+            psi (Optional[float]): Flaring angle of the emission surface.
+            z_func (Optional[function]): A function which provides
+                :math:`z(r)`.
+            mstar (Optional[float]): Stellar mass in [Msun].
+            dist (Optional[float]): Distance to the source in [pc].
+            mu (Optional[float]) : average molecular weight in [amu].
+        Returns:
+            The corrected intensity profile in jy/beam and the standard
+            deviation of the corrected profile posteriors in each annulus.
+        """
+        vvals = self._keplerian(rvals, mstar=mstar, dist=dist, inc=inc, z0=z0, 
+                psi=psi, r_cavity=r_cavity, r_taper=r_taper, q_taper=q_taper, 
+                z_func=z_func)
+
+        beam = (self.bmaj + self.bmin)/2
+        beam_sig = dist * beam / 2 * np.sqrt(2 * np.log(2))
+        broad_const = 2 * np.sqrt(2 * np.log(2)) * np.sqrt(sc.k / (mu * (sc.m_p + sc.m_e)))
+        deltr_const = 4 * sc.G * mstar * 1.988e30 * np.sin(np.radians(inc))**2 \
+                / (2 * np.sqrt(2 * np.log(2))) / sc.au
+        
+        def amplitude_factor_gaussian(sig, thet):
+            return sig / np.sqrt(thet**2 + sig**2)
+
+        def amplitude_factor_tophat(sig, thet):
+            z = SIG_TO_FWHM * sig / (np.sqrt(2) * thet) / 2
+            return special.erf(z) 
+            
+        def model_I(T, amplitude_factor, v_peak):
+            hwhm_v_therm = broad_const * np.sqrt(T)
+            sig_r = deltr_const * v_peak * hwhm_v_therm / (v_peak**2 - hwhm_v_therm**2)**2
+            return self.Tb_to_jybeam(T) * amplitude_factor(sig_r, beam_sig)
+
+        def log_likelihood(T, I, dI, amplitude_factor, v_peak):
+            return -0.5 * ((I - model_I(T, amplitude_factor, v_peak))/dI)**2
+
+        def log_prior(T):
+            if 10000 > T > 0.:
+                return 0.
+            return -np.inf
+            
+        def log_probability(T, I, dI, amplitude_factor, v_peak):
+            lp = log_prior(T)
+            if not np.isfinite(lp):
+                return -np.inf
+            return lp + log_likelihood(T, I, dI, amplitude_factor, v_peak)
+
+        import emcee
+        from tqdm import tqdm
+
+        Is = []
+        Istds = []
+
+        for r, vpeak, I, dI in tqdm(zip(rvals, vvals, ravgs, rstds), total=len(rvals)):
+            if np.isnan(self.jybeam_to_Tb(I)):
+                Is.append(np.nan)
+                Istds.append(np.nan)
+                continue
+            pos = self.jybeam_to_Tb(I) + 1e-4 * np.random.randn(32, 1) + 1.
+            nwalkers, ndim = pos.shape
+
+            sampler = emcee.EnsembleSampler(
+                nwalkers, ndim, log_probability,
+                args=(I, dI, amplitude_factor_gaussian, vpeak)
+            )
+            
+            sampler.run_mcmc(pos, 200)
+            flat_samples = sampler.get_chain(discard=120, flat=True)
+
+            I_samples = self.Tb_to_jybeam(flat_samples)
+            Is.append(np.mean(I_samples))
+            Istds.append(np.std(I_samples))
+
+        return np.array(Is), np.array(Istds)
 
     def shifted_cube(self, inc, PA, x0=0.0, y0=0.0, z0=None, psi=None,
         r_cavity=None, r_taper=None, q_taper=None, z_func=None, mstar=None,
